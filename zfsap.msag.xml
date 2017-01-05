@@ -1,0 +1,31 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_MSAG" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
+  <asx:values>
+   <T100A>
+    <ARBGB>ZFSAP</ARBGB>
+    <MASTERLANG>E</MASTERLANG>
+    <APPLCLASS/>
+    <RESPUSER/>
+    <LASTUSER/>
+    <LDATE>0000-00-00</LDATE>
+    <LTIME>00:00:00</LTIME>
+    <STEXT>Message Class for ZCX_SIMPLE_ACC_POST</STEXT>
+   </T100A>
+   <T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZFSAP</ARBGB>
+     <MSGNR>000</MSGNR>
+     <TEXT>&amp; &amp; &amp; &amp;</TEXT>
+    </T100>
+    <T100>
+     <SPRSL>E</SPRSL>
+     <ARBGB>ZFSAP</ARBGB>
+     <MSGNR>001</MSGNR>
+     <TEXT>Error calculating tax amount: &amp; &amp; &amp; &amp;</TEXT>
+    </T100>
+   </T100>
+  </asx:values>
+ </asx:abap>
+</abapGit>
