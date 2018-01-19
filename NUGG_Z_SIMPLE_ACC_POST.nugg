@@ -1,0 +1,2554 @@
+<?xml version="1.0" encoding="utf-8"?>
+<nugget name="Z_SIMPLE_ACC_POST">
+ <CLAS CLSNAME="ZCL_SIMPLE_ACC_POST" VERSION="1" LANGU="S" DESCRIPT="Simplest way to make account posting" CATEGORY="00" EXPOSURE="2" STATE="1" RELEASE="0" CLSFINAL="X" CLSCCINCL="X" FIXPT="X" UNICODE="X" CLSBCCAT="00" DURATION_TYPE="0 " RISK_LEVEL="0 " ZSAPLINK_PLUGIN_MAJOR_VERSION="0 " ZSAPLINK_PLUGIN_MINOR_VERSION="1 " ZSAPLINK_PLUGIN_BUILD_VERSION="0 " ZSAPLINK_PLUGIN_INFO1="ZSAPLINK_CLASS is part of the main ZSAPLINK project --&gt; This plugin found there instead of ZSAPLINK_PLUGINS projects" ZSAPLINK_PLUGIN_INFO2="SAPLINK homepage: https://www.assembla.com/spaces/saplink/wiki" ZSAPLINK_PLUGIN_INFO3="Download from https://www.assembla.com/code/saplink/subversion/nodes" ZSAPLINK_PLUGIN_INFO4="and navigate to:  trunk -&gt; core -&gt; ZSAPLINK -&gt; CLAS -&gt; ZSAPLINK_CLASS.slnk">
+  <types CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="TY_ACCPOST_DOC" VERSION="1" LANGU="E" DESCRIPT="Accounting Document information" EXPOSURE="2" STATE="1" EDITORDER="1 " TYPTYPE="4" SRCROW1="9 " SRCCOLUMN1="4 " SRCROW2="20 " SRCCOLUMN2="30 " TYPESRC_LENG="0 " TYPESRC='BEGIN OF TY_ACCPOST_DOC,
+            ICON_STS  TYPE ICON_D,       &quot; Status ICON
+            ID_ACCDOC TYPE C LENGTH 255, &quot; Financial document ID
+            LOG_NO    TYPE N LENGTH 10,  &quot; Internal LOG number. We will use it to link document header with results table.
+            STATUS TYPE STRING,          &quot; Last status of ID_ACCDOC
+            AWTYP  TYPE AWTYP,           &quot; Reference Transaction
+            AWKEY  TYPE AWKEY,           &quot; Reference Key
+            AWSYS  TYPE AWSYS,           &quot; Logical system of source document
+            BUKRS  TYPE BUKRS,           &quot; Company Code
+            BELNR  TYPE BELNR_D,         &quot; Accounting document number
+            GJAHR  TYPE GJAHR,           &quot; Fiscal year
+          END OF TY_ACCPOST_DOC
+'/>
+  <types CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="TT_ACCPOST" VERSION="1" LANGU="E" DESCRIPT="Main table for class ZCL_SIMPLE_ACC_POST" EXPOSURE="2" STATE="1" EDITORDER="2 " TYPTYPE="4" SRCROW1="22 " SRCCOLUMN1="4 " SRCROW2="22 " SRCCOLUMN2="56 " TYPESRC_LENG="0 " TYPESRC="TT_ACCPOST type STANDARD TABLE OF ZFIS_SIMPLE_ACCPOST
+"/>
+  <types CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="TT_ACCPOST_DOC" VERSION="1" LANGU="E" DESCRIPT="Table of status and reference to created documents" EXPOSURE="2" STATE="1" EDITORDER="3 " TYPTYPE="4" SRCROW1="24 " SRCCOLUMN1="4 " SRCROW2="24 " SRCCOLUMN2="55 " TYPESRC_LENG="0 " TYPESRC="TT_ACCPOST_DOC type STANDARD TABLE OF TY_ACCPOST_DOC
+"/>
+  <types CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="TT_ACCPOST_MSG" VERSION="1" LANGU="E" DESCRIPT="Collect messages returned by each execution of standard BAPI" EXPOSURE="2" STATE="1" EDITORDER="4 " TYPTYPE="1" TYPE="TT_BAPIRET2" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <localImplementation>*&quot;* use this source file for the definition and implementation of
+*&quot;* local helper classes, interface definitions and type
+*&quot;* declarations
+
+&quot; --------------------------------------------------------------------------------------------------------------------------------------------
+&quot; https://github.com/sbcgua/abap_data_parser
+&quot; TAB-delimited text parser for ABAP
+&quot; Abap data parser is an utility to parse TAB-delimited text into an internal table of an arbitrary flat structure.
+&quot; It support &quot;unstrict&quot; mode which allows to skip fields in the source data (for the case when only certain fields are being loaded).
+&quot; It supports &quot;header&quot; specification as the first line in the text - in this case field order in the text may differ from the
+&quot; internal abap structure field order. It also supports loading into a structure (the first data line of the text is parsed).
+
+INCLUDE ZDATA_PARSER_CLASS.
+&quot; --------------------------------------------------------------------------------------------------------------------------------------------
+
+
+&quot; --------------------------------------------------------------------------------------------------------------------------------------------
+TYPE-POOLS: ICON. &quot;Iconos
+CLASS LCL_RESULT_EVENTS DEFINITION DEFERRED.
+
+*&amp;---------------------------------------------------------------------*
+*&amp;       Class LCL_RESULT DEFINITION
+*&amp;---------------------------------------------------------------------*
+*        Utility class to show posting details in a new dialog box.
+*
+*        This window has 3 tables:
+*        - At top-left: A table with status of all documents (distinct ID_ACCDOC)
+*        - At top-right: A table with parsed clipboard data
+*        - At botton: A table with all messages returned by BAPI_ACC_DOCUMENT_POST
+*----------------------------------------------------------------------*
+CLASS LCL_RESULT DEFINITION.
+  PUBLIC SECTION.
+    TYPES:
+      TT_ACCPOST TYPE STANDARD TABLE OF ZFIS_SIMPLE_ACCPOST.
+
+    DATA:
+      T_ACCPOST_DOC     TYPE ZCL_SIMPLE_ACC_POST=&gt;TT_ACCPOST_DOC,
+      T_ACCPOST         TYPE TT_ACCPOST,
+      T_ACCPOST_MSG     TYPE BAPIRET2_T,
+      R_ALV_ACCPOST_DOC TYPE REF TO CL_SALV_TABLE,
+      R_ALV_ACCPOST     TYPE REF TO CL_SALV_TABLE,
+      R_ALV_ACCPOST_MSG TYPE REF TO CL_SALV_TABLE.
+
+    CONSTANTS:
+      C_DIALOG_WIDTH  TYPE I VALUE &apos;1500&apos;,    &quot; Width of dialog box
+      C_DIALOG_HEIGHT TYPE I VALUE &apos;400&apos;.     &quot; Height of dialog box
+
+    METHODS:
+      CONSTRUCTOR
+        IMPORTING IT_ACCPOST_DOC TYPE ZCL_SIMPLE_ACC_POST=&gt;TT_ACCPOST_DOC
+                  IT_ACCPOST     TYPE TT_ACCPOST
+                  IT_ACCPOST_MSG TYPE BAPIRET2_T,
+      DISPLAY.
+
+  PRIVATE SECTION.
+    DATA:
+      R_ALV_EVENTS      TYPE REF TO LCL_RESULT_EVENTS,
+      R_DIALOG          TYPE REF TO CL_GUI_DIALOGBOX_CONTAINER,   &quot; Ventana principal
+      R_SPLITTER_1      TYPE REF TO CL_GUI_SPLITTER_CONTAINER,    &quot; Splitter top-bottom
+      R_SPLITTER_2      TYPE REF TO CL_GUI_SPLITTER_CONTAINER,    &quot; Splitter left-right.
+      R_CELL_TOP        TYPE REF TO CL_GUI_CONTAINER,             &quot; Top cell of splitter 1
+      R_CELL_TOP_LEFT   TYPE REF TO CL_GUI_CONTAINER,             &quot; Left cell of splitter 2 (R_ALV_ACCPOST_DOC)
+      R_CELL_TOP_RIGHT  TYPE REF TO CL_GUI_CONTAINER,             &quot; Right cell of splitter 2 (R_ALV_ACCPOST)
+      R_CELL_BOTTOM     TYPE REF TO CL_GUI_CONTAINER.             &quot; Bottom cell of splitter 1 (R_ALV_ACCPOST_MSG)
+
+    METHODS:
+      ADD_ALV_ACCPOST_DOC IMPORTING IR_CONTAINER TYPE REF TO CL_GUI_CONTAINER,
+      ADD_ALV_ACCPOST     IMPORTING IR_CONTAINER TYPE REF TO CL_GUI_CONTAINER,
+      ADD_ALV_ACCPOST_MSG IMPORTING IR_CONTAINER TYPE REF TO CL_GUI_CONTAINER.
+
+ENDCLASS.               &quot;LCL_RESULT
+
+
+*&amp;---------------------------------------------------------------------*
+*&amp;       Class LCL_RESULT_EVENTS DEFINITION
+*&amp;---------------------------------------------------------------------*
+*        Manage events of ALVs
+*----------------------------------------------------------------------*
+CLASS LCL_RESULT_EVENTS DEFINITION.
+  PUBLIC SECTION.
+
+    DATA:
+      R_RESULT TYPE REF TO LCL_RESULT.
+
+    METHODS:
+      ON_DOUBLE_CLICK FOR EVENT DOUBLE_CLICK OF CL_SALV_EVENTS_TABLE
+        IMPORTING ROW COLUMN,
+      ON_LINK_CLICK FOR EVENT LINK_CLICK OF CL_SALV_EVENTS_TABLE
+        IMPORTING ROW COLUMN.
+*      ON_LINK_CLICK FOR EVENT LINK_CLICK OF CL_SALV_EVENTS_TREE
+*        IMPORTING NODE_KEY COLUMNNAME SENDER,
+*      ON_KEYPRESS FOR EVENT KEYPRESS OF CL_SALV_EVENTS_TREE
+*        IMPORTING NODE_KEY COLUMNNAME KEY,
+*      ON_USER_COMMAND FOR EVENT ADDED_FUNCTION OF CL_SALV_EVENTS
+*        IMPORTING E_SALV_FUNCTION.
+*      ON_BEFORE_USER_COMMAND FOR EVENT BEFORE_SALV_FUNCTION OF CL_SALV_EVENTS
+*        IMPORTING E_SALV_FUNCTION,
+*      ON_AFTER_USER_COMMAND FOR EVENT AFTER_SALV_FUNCTION OF CL_SALV_EVENTS
+*        IMPORTING E_SALV_FUNCTION.
+
+ENDCLASS.               &quot;LCL_MAIN_EVENTS
+
+
+*---------------------------------------------------------------------*
+*       CLASS LCL_RESULT_EVENTS IMPLEMENTATION
+*---------------------------------------------------------------------*
+*       Manage events of ALVs
+*---------------------------------------------------------------------*
+CLASS LCL_RESULT_EVENTS IMPLEMENTATION.
+
+  METHOD ON_DOUBLE_CLICK.
+    DATA: LS_ACCPOST_DOC TYPE ZCL_SIMPLE_ACC_POST=&gt;TY_ACCPOST_DOC,
+          LS_LOW_ACCPOST TYPE SALV_DE_SELOPT_LOW,
+          LS_LOW_BAPIRET TYPE SALV_DE_SELOPT_LOW.
+
+    &quot; Retrieve data row
+    READ TABLE ME-&gt;R_RESULT-&gt;T_ACCPOST_DOC INTO LS_ACCPOST_DOC INDEX ROW.
+    LS_LOW_BAPIRET = LS_ACCPOST_DOC-LOG_NO.
+    LS_LOW_ACCPOST = LS_ACCPOST_DOC-ID_ACCDOC.
+
+    IF LS_ACCPOST_DOC IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    &quot; Clear filters of messages
+    DATA: LO_FILTERS TYPE REF TO CL_SALV_FILTERS.
+    LO_FILTERS = ME-&gt;R_RESULT-&gt;R_ALV_ACCPOST_MSG-&gt;GET_FILTERS( ).
+    LO_FILTERS-&gt;CLEAR( ).
+
+    &quot; Add filter with related messages
+    TRY .
+
+        LO_FILTERS-&gt;ADD_FILTER(
+          EXPORTING
+            COLUMNNAME = &apos;LOG_NO&apos;          &quot; ALV Control: Field Name of Internal Table Field
+            SIGN       = &apos;I&apos;               &quot; Selection Condition Sign
+            OPTION     = &apos;EQ&apos;              &quot; Selection Condition Option
+            LOW        = LS_LOW_BAPIRET    &quot; Lower Value of Selection Condition
+        ).
+
+      CATCH CX_SALV_NOT_FOUND CX_SALV_DATA_ERROR CX_SALV_EXISTING.
+    ENDTRY.
+
+    &quot; Apply filter
+    ME-&gt;R_RESULT-&gt;R_ALV_ACCPOST_MSG-&gt;REFRESH(
+      EXPORTING
+        REFRESH_MODE = IF_SALV_C_REFRESH=&gt;FULL
+    ).
+
+
+    &quot; Clear filters of items
+    DATA: LO_FILTERS2 TYPE REF TO CL_SALV_FILTERS.
+    LO_FILTERS2 = ME-&gt;R_RESULT-&gt;R_ALV_ACCPOST-&gt;GET_FILTERS( ).
+    LO_FILTERS2-&gt;CLEAR( ).
+
+    TRY .
+
+        LO_FILTERS2-&gt;ADD_FILTER(
+          EXPORTING
+            COLUMNNAME = &apos;ID_ACCDOC&apos;       &quot; ALV Control: Field Name of Internal Table Field
+            SIGN       = &apos;I&apos;               &quot; Selection Condition Sign
+            OPTION     = &apos;EQ&apos;              &quot; Selection Condition Option
+            LOW        = LS_LOW_ACCPOST    &quot; Lower Value of Selection Condition
+        ).
+
+      CATCH CX_SALV_NOT_FOUND CX_SALV_DATA_ERROR CX_SALV_EXISTING.
+    ENDTRY.
+
+    &quot; Apply filter
+    ME-&gt;R_RESULT-&gt;R_ALV_ACCPOST-&gt;REFRESH(
+      EXPORTING
+        REFRESH_MODE = IF_SALV_C_REFRESH=&gt;FULL
+    ).
+
+
+  ENDMETHOD.                    &quot;ON_DOUBLE_CLICK
+
+
+  METHOD ON_LINK_CLICK.
+    DATA LS_ACCPOST_DOC TYPE ZCL_SIMPLE_ACC_POST=&gt;TY_ACCPOST_DOC.
+
+    &quot; Retrieve row data
+    READ TABLE ME-&gt;R_RESULT-&gt;T_ACCPOST_DOC INTO LS_ACCPOST_DOC INDEX ROW.
+
+    CASE COLUMN.
+      WHEN &apos;ID_ACCDOC&apos;.
+        IF LS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_OK OR LS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_WARNING.
+          CALL FUNCTION &apos;BAPI_ACC_DOCUMENT_DISPLAY&apos;
+            EXPORTING
+              OBJ_TYPE = LS_ACCPOST_DOC-AWTYP
+              OBJ_KEY  = LS_ACCPOST_DOC-AWKEY
+              OBJ_SYS  = LS_ACCPOST_DOC-AWSYS.
+        ENDIF.
+    ENDCASE.
+
+  ENDMETHOD.                    &quot;ON_LINK_CLICK
+
+
+ENDCLASS.                    &quot;LCL_RESULT_EVENTS IMPLEMENTATION
+
+
+*---------------------------------------------------------------------*
+*       CLASS LCL_RESULT IMPLEMENTATION
+*---------------------------------------------------------------------*
+*       Muestra el RESULT de ZCL_CONTABILIZA
+*---------------------------------------------------------------------*
+CLASS LCL_RESULT IMPLEMENTATION.
+
+
+  METHOD CONSTRUCTOR.
+
+    ME-&gt;T_ACCPOST_DOC   = IT_ACCPOST_DOC.
+    ME-&gt;T_ACCPOST       = IT_ACCPOST.
+    ME-&gt;T_ACCPOST_MSG   = IT_ACCPOST_MSG.
+
+  ENDMETHOD.                    &quot;CONSTRUCTOR
+
+
+  METHOD DISPLAY.
+
+    &quot; Create Dialog box
+    CREATE OBJECT R_DIALOG
+      EXPORTING
+        PARENT                      = CL_GUI_CONTAINER=&gt;SCREEN0    &quot; Parent container
+*       PARENT                      = CL_GUI_CONTAINER=&gt;DESKTOP    &quot; Parent container
+        WIDTH                       = LCL_RESULT=&gt;C_DIALOG_WIDTH    &quot; Width of This Container
+        HEIGHT                      = LCL_RESULT=&gt;C_DIALOG_HEIGHT     &quot; Height of This Container
+*       STYLE                       = cl_gui_control=&gt;WS_MAXIMIZEBOX    &quot; Windows Style Attributes Applied to this Container
+*       REPID                       = SY-REPI2    &quot; Report to Which This Control is Linked
+*       DYNNR                       = sy-DYNNR    &quot; Screen to Which the Control is Linked
+*       LIFETIME                    = CL_GUI_CONTAINER=&gt;LIFETIME_DEFAULT    &quot; Lifetime
+        TOP                         = 25    &quot; Top Position of Dialog Box
+        LEFT                        = 50    &quot; Left Position of Dialog Box
+        CAPTION                     = &apos;Posting details&apos;    &quot; Dialog Box Caption
+*       NO_AUTODEF_PROGID_DYNNR     =     &quot; Don&apos;t Autodefined Progid and Dynnr?
+*       METRIC                      = 0    &quot; Metric
+*       NAME                        =     &quot; Name
+      EXCEPTIONS
+        CNTL_ERROR                  = 1
+        CNTL_SYSTEM_ERROR           = 2
+        CREATE_ERROR                = 3
+        LIFETIME_ERROR              = 4
+        LIFETIME_DYNPRO_DYNPRO_LINK = 5
+        EVENT_ALREADY_REGISTERED    = 6
+        ERROR_REGIST_EVENT          = 7
+        OTHERS                      = 8.
+    IF SY-SUBRC &lt;&gt; 0.
+      RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+        EXPORTING
+          TEXTID = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+          ATTR1  = &apos;Error creating R_DIALOG&apos;.
+    ENDIF.
+
+    &quot; Activate &quot;X&quot; by default to close dialog box
+    R_DIALOG-&gt;REG_EVENT_CLOSE( REGISTER  = 0 ).   &quot; True = Register, False = Deregister
+
+    &quot; 2 rows splitter
+    CREATE OBJECT R_SPLITTER_1
+      EXPORTING
+        PARENT                  = R_DIALOG
+        ROWS                    = 2
+        COLUMNS                 = 1
+*       NO_AUTODEF_PROGID_DYNNR =
+*       NAME                    =
+      EXCEPTIONS
+        CNTL_ERROR              = 1
+        CNTL_SYSTEM_ERROR       = 2
+        OTHERS                  = 3.
+
+    IF SY-SUBRC &lt;&gt; 0.
+      RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+        EXPORTING
+          TEXTID = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+          ATTR1  = &apos;Error creating R_SPLITTER_1&apos;.
+    ENDIF.
+
+    &quot; Reference to TOP cell (Documents and items)
+    CALL METHOD R_SPLITTER_1-&gt;GET_CONTAINER
+      EXPORTING
+        ROW       = 1
+        COLUMN    = 1
+      RECEIVING
+        CONTAINER = R_CELL_TOP.
+
+    &quot; 2 columns splitter (Documents at left and items at right)
+    CREATE OBJECT R_SPLITTER_2
+      EXPORTING
+        PARENT                  = R_CELL_TOP
+        ROWS                    = 1
+        COLUMNS                 = 2
+*       NO_AUTODEF_PROGID_DYNNR =
+*       NAME                    =
+      EXCEPTIONS
+        CNTL_ERROR              = 1
+        CNTL_SYSTEM_ERROR       = 2
+        OTHERS                  = 3.
+
+    IF SY-SUBRC &lt;&gt; 0.
+      RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+        EXPORTING
+          TEXTID = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+          ATTR1  = &apos;Error creating R_SPLITTER_2&apos;.
+    ENDIF.
+
+    &quot; Add ALV of documents to top-left cell
+    IF LINES( ME-&gt;T_ACCPOST_DOC ) &gt; 0.
+
+      CALL METHOD R_SPLITTER_2-&gt;GET_CONTAINER
+        EXPORTING
+          ROW       = 1
+          COLUMN    = 1
+        RECEIVING
+          CONTAINER = R_CELL_TOP_LEFT.
+
+      ME-&gt;ADD_ALV_ACCPOST_DOC( IR_CONTAINER = R_CELL_TOP_LEFT ).
+
+    ENDIF.
+
+    &quot; Add ALV of items to top-right cell
+    IF LINES( ME-&gt;T_ACCPOST ) &gt; 0.
+
+      CALL METHOD R_SPLITTER_2-&gt;GET_CONTAINER
+        EXPORTING
+          ROW       = 1
+          COLUMN    = 2
+        RECEIVING
+          CONTAINER = R_CELL_TOP_RIGHT.
+
+      ME-&gt;ADD_ALV_ACCPOST( IR_CONTAINER = R_CELL_TOP_RIGHT ).
+
+    ELSE.
+      R_SPLITTER_2-&gt;SET_COLUMN_WIDTH( ID = 1 WIDTH = 100 ).
+    ENDIF.
+
+    &quot; Add ALV of BAPI messages to buttom cell
+    IF LINES( ME-&gt;T_ACCPOST_MSG ) &gt; 0.
+
+      CALL METHOD R_SPLITTER_1-&gt;GET_CONTAINER
+        EXPORTING
+          ROW       = 2
+          COLUMN    = 1
+        RECEIVING
+          CONTAINER = R_CELL_BOTTOM. &quot; Tabla de log BAPIRET2
+
+      ME-&gt;ADD_ALV_ACCPOST_MSG( IR_CONTAINER = R_CELL_BOTTOM ).
+
+      R_SPLITTER_1-&gt;SET_ROW_HEIGHT( ID = 1 HEIGHT = 80 ).
+    ELSE.
+      R_SPLITTER_1-&gt;SET_ROW_HEIGHT( ID = 1 HEIGHT = 100 ).
+    ENDIF.
+
+
+    &quot; Refresh window
+    CALL METHOD CL_GUI_CFW=&gt;FLUSH
+      EXCEPTIONS
+        CNTL_SYSTEM_ERROR = 1
+        CNTL_ERROR        = 2
+        OTHERS            = 3.
+    IF SY-SUBRC &lt;&gt; 0.
+      RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+        EXPORTING
+          TEXTID = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+          ATTR1  = &apos;Error creating R_SPLITTER_2&apos;.
+    ENDIF.
+
+  ENDMETHOD.                    &quot;DISPLAY
+
+
+  METHOD ADD_ALV_ACCPOST.
+    DATA: LR_CX_SALV_ERROR TYPE REF TO CX_SALV_ERROR.
+
+
+    TRY .
+
+        &quot; Create ALV on container
+        CL_SALV_TABLE=&gt;FACTORY(
+            EXPORTING
+              R_CONTAINER  = IR_CONTAINER
+            IMPORTING
+              R_SALV_TABLE = ME-&gt;R_ALV_ACCPOST
+            CHANGING
+              T_TABLE      = ME-&gt;T_ACCPOST
+          ).
+
+        &quot; Columns
+        DATA LR_COLUMNS TYPE REF TO CL_SALV_COLUMNS_TABLE.
+        LR_COLUMNS = ME-&gt;R_ALV_ACCPOST-&gt;GET_COLUMNS( ).
+        LR_COLUMNS-&gt;SET_OPTIMIZE( ).
+
+        &quot; Functions
+        DATA LR_FUNCTIONS TYPE REF TO CL_SALV_FUNCTIONS_LIST.
+        LR_FUNCTIONS = ME-&gt;R_ALV_ACCPOST-&gt;GET_FUNCTIONS( ).
+        LR_FUNCTIONS-&gt;SET_ALL( ).
+
+        &quot; Display
+        ME-&gt;R_ALV_ACCPOST-&gt;DISPLAY( ).
+
+      CATCH CX_SALV_MSG CX_SALV_EXISTING CX_SALV_DATA_ERROR CX_SALV_NOT_FOUND INTO LR_CX_SALV_ERROR .
+        RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+          EXPORTING
+            TEXTID   = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+            PREVIOUS = LR_CX_SALV_ERROR
+            ATTR1    = &apos;Error creating R_ALV_ACCPOST&apos;.
+    ENDTRY.
+
+
+  ENDMETHOD.                    &quot;ALV_ACCPOST
+
+
+  METHOD ADD_ALV_ACCPOST_DOC.
+    DATA: LR_CX_SALV_ERROR TYPE REF TO CX_SALV_ERROR,
+          LS_ACCPOST_DOC TYPE ZCL_SIMPLE_ACC_POST=&gt;TY_ACCPOST_DOC.
+
+
+    TRY .
+
+        &quot; Set icon status
+        LOOP AT ME-&gt;T_ACCPOST_DOC INTO LS_ACCPOST_DOC.
+
+          CASE LS_ACCPOST_DOC-STATUS.
+            WHEN ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_NEW.
+              LS_ACCPOST_DOC-ICON_STS = ICON_LIGHT_OUT.
+            WHEN ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_OK.
+              LS_ACCPOST_DOC-ICON_STS = ICON_GREEN_LIGHT.
+            WHEN ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_WARNING.
+              LS_ACCPOST_DOC-ICON_STS = ICON_YELLOW_LIGHT.
+            WHEN ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_ERROR.
+              LS_ACCPOST_DOC-ICON_STS = ICON_RED_LIGHT.
+          ENDCASE.
+
+          MODIFY ME-&gt;T_ACCPOST_DOC FROM LS_ACCPOST_DOC.
+
+        ENDLOOP.
+
+
+        &quot; Create ALV on container
+        CL_SALV_TABLE=&gt;FACTORY(
+            EXPORTING
+              R_CONTAINER  = IR_CONTAINER
+            IMPORTING
+              R_SALV_TABLE = ME-&gt;R_ALV_ACCPOST_DOC
+            CHANGING
+              T_TABLE      = ME-&gt;T_ACCPOST_DOC
+          ).
+
+        &quot; Columns
+        DATA:
+          LO_COLUMNS TYPE REF TO CL_SALV_COLUMNS_TABLE,
+          LO_COLUMN TYPE REF TO CL_SALV_COLUMN_TABLE.
+
+        LO_COLUMNS = ME-&gt;R_ALV_ACCPOST_DOC-&gt;GET_COLUMNS( ).
+        LO_COLUMNS-&gt;SET_OPTIMIZE( ).
+
+        TRY.
+
+            LO_COLUMN ?= LO_COLUMNS-&gt;GET_COLUMN( &apos;ICON_STS&apos; ).
+            LO_COLUMN-&gt;SET_ICON( IF_SALV_C_BOOL_SAP=&gt;TRUE ).
+            LO_COLUMN-&gt;SET_LONG_TEXT( &apos;Status&apos; ).
+            LO_COLUMN-&gt;SET_ALIGNMENT( IF_SALV_C_ALIGNMENT=&gt;CENTERED ).
+            LO_COLUMN-&gt;SET_OUTPUT_LENGTH( 25 ).
+
+            LO_COLUMN ?= LO_COLUMNS-&gt;GET_COLUMN( &apos;STATUS&apos; ).
+            LO_COLUMN-&gt;SET_VISIBLE( ABAP_FALSE ).
+
+            LO_COLUMN ?= LO_COLUMNS-&gt;GET_COLUMN( &apos;ID_ACCDOC&apos; ).
+            LO_COLUMN-&gt;SET_LONG_TEXT( &apos;ID_ACCDOC&apos; ).
+            LO_COLUMN-&gt;SET_CELL_TYPE( IF_SALV_C_CELL_TYPE=&gt;HOTSPOT ).
+
+
+          CATCH CX_SALV_NOT_FOUND.                      &quot;#EC NO_HANDLER
+        ENDTRY.
+
+        &quot; Tooltips
+        DATA: LO_FUNCTIONAL_SETTINGS  TYPE REF TO CL_SALV_FUNCTIONAL_SETTINGS.
+        DATA: LO_TOOLTIPS             TYPE REF TO CL_SALV_TOOLTIPS,
+              LV_VALUE                TYPE LVC_VALUE.
+
+        LO_FUNCTIONAL_SETTINGS =  ME-&gt;R_ALV_ACCPOST_DOC-&gt;GET_FUNCTIONAL_SETTINGS( ).
+        LO_TOOLTIPS = LO_FUNCTIONAL_SETTINGS-&gt;GET_TOOLTIPS( ).
+        TRY.
+            LV_VALUE = ICON_GREEN_LIGHT.
+            LO_TOOLTIPS-&gt;ADD_TOOLTIP(
+              TYPE    = CL_SALV_TOOLTIP=&gt;C_TYPE_ICON
+              VALUE   = LV_VALUE
+              TOOLTIP = &apos;OK&apos; ).                             &quot;#EC NOTEXT
+          CATCH CX_SALV_EXISTING.                       &quot;#EC NO_HANDLER
+        ENDTRY.
+        TRY.
+            LV_VALUE = ICON_YELLOW_LIGHT.
+            LO_TOOLTIPS-&gt;ADD_TOOLTIP(
+              TYPE    = CL_SALV_TOOLTIP=&gt;C_TYPE_ICON
+              VALUE   = LV_VALUE
+              TOOLTIP = &apos;Found warnigs&apos; ).                  &quot;#EC NOTEXT
+          CATCH CX_SALV_EXISTING.                       &quot;#EC NO_HANDLER
+        ENDTRY.
+        TRY.
+            LV_VALUE = ICON_RED_LIGHT.
+            LO_TOOLTIPS-&gt;ADD_TOOLTIP(
+              TYPE    = CL_SALV_TOOLTIP=&gt;C_TYPE_ICON
+              VALUE   = LV_VALUE
+              TOOLTIP = &apos;Found errors&apos; ).                   &quot;#EC NOTEXT
+          CATCH CX_SALV_EXISTING.                       &quot;#EC NO_HANDLER
+        ENDTRY.
+
+
+        &quot; Multiselection
+        DATA: LO_SELECTIONS TYPE REF TO CL_SALV_SELECTIONS.
+        LO_SELECTIONS = ME-&gt;R_ALV_ACCPOST_DOC-&gt;GET_SELECTIONS( ).
+        LO_SELECTIONS-&gt;SET_SELECTION_MODE( IF_SALV_C_SELECTION_MODE=&gt;SINGLE ).
+
+
+        &quot; Functions
+        DATA LO_FUNCTIONS TYPE REF TO CL_SALV_FUNCTIONS_LIST.
+        LO_FUNCTIONS = ME-&gt;R_ALV_ACCPOST_DOC-&gt;GET_FUNCTIONS( ).
+        LO_FUNCTIONS-&gt;SET_ALL( ).
+
+        &quot; Events
+        DATA: LO_EVENTS TYPE REF TO CL_SALV_EVENTS_TABLE.
+
+        LO_EVENTS = ME-&gt;R_ALV_ACCPOST_DOC-&gt;GET_EVENT( ).
+        CREATE OBJECT ME-&gt;R_ALV_EVENTS.
+        ME-&gt;R_ALV_EVENTS-&gt;R_RESULT = ME.
+        SET HANDLER ME-&gt;R_ALV_EVENTS-&gt;ON_DOUBLE_CLICK FOR LO_EVENTS.
+        SET HANDLER ME-&gt;R_ALV_EVENTS-&gt;ON_LINK_CLICK FOR LO_EVENTS.
+
+
+        &quot; Display
+        ME-&gt;R_ALV_ACCPOST_DOC-&gt;DISPLAY( ).
+
+      CATCH CX_SALV_MSG CX_SALV_EXISTING CX_SALV_DATA_ERROR CX_SALV_NOT_FOUND INTO LR_CX_SALV_ERROR .
+        RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+          EXPORTING
+            TEXTID   = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+            PREVIOUS = LR_CX_SALV_ERROR
+            ATTR1    = &apos;Error creating R_ALV_ACCPOST_DOC&apos;.
+    ENDTRY.
+
+
+  ENDMETHOD.                    &quot;ALV_ACCPOST_DOC
+
+
+  METHOD ADD_ALV_ACCPOST_MSG.
+    DATA: LR_CX_SALV_ERROR TYPE REF TO CX_SALV_ERROR.
+
+
+    TRY .
+
+        &quot; Create ALV on container
+        CL_SALV_TABLE=&gt;FACTORY(
+            EXPORTING
+              R_CONTAINER  = IR_CONTAINER
+            IMPORTING
+              R_SALV_TABLE = ME-&gt;R_ALV_ACCPOST_MSG
+            CHANGING
+              T_TABLE      = ME-&gt;T_ACCPOST_MSG
+          ).
+
+        &quot; Columns
+        DATA: LO_COLUMNS TYPE REF TO CL_SALV_COLUMNS_TABLE.
+        LO_COLUMNS = ME-&gt;R_ALV_ACCPOST_MSG-&gt;GET_COLUMNS( ).
+        LO_COLUMNS-&gt;SET_OPTIMIZE( ).
+
+        &quot; Funtions
+        DATA LO_FUNCTIONS TYPE REF TO CL_SALV_FUNCTIONS_LIST.
+        LO_FUNCTIONS = ME-&gt;R_ALV_ACCPOST_MSG-&gt;GET_FUNCTIONS( ).
+        LO_FUNCTIONS-&gt;SET_ALL( ).
+
+        &quot; Display
+        ME-&gt;R_ALV_ACCPOST_MSG-&gt;DISPLAY( ).
+
+      CATCH CX_SALV_MSG CX_SALV_EXISTING CX_SALV_DATA_ERROR CX_SALV_NOT_FOUND INTO LR_CX_SALV_ERROR .
+        RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+          EXPORTING
+            TEXTID   = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+            PREVIOUS = LR_CX_SALV_ERROR
+            ATTR1    = &apos;Error creating R_ALV_ACCPOST_MSG&apos;.
+    ENDTRY.
+
+
+  ENDMETHOD.                    &quot;ALV_RETURN
+
+
+ENDCLASS.                    &quot;LCL_RESULT IMPLEMENTATION
+&quot; --------------------------------------------------------------------------------------------------------------------------------------------</localImplementation>
+  <localTypes>*&quot;* use this source file for any type of declarations (class
+*&quot;* definitions, interfaces or type declarations) you need for
+*&quot;* components in the private section</localTypes>
+  <localMacros>*&quot;* use this source file for any macro definitions you need
+*&quot;* in the implementation part of the class</localMacros>
+  <textPool>
+   <language SPRAS="E"/>
+  </textPool>
+  <typeUsage CLSNAME="ZCL_SIMPLE_ACC_POST" TYPEGROUP="ABAP" VERSION="1" TPUTYPE="0" IMPLICIT="X"/>
+  <forwardDeclaration>ABAP</forwardDeclaration>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="C_SLG0_OBJECT" VERSION="1" LANGU="E" DESCRIPT="SLG0 Object" EXPOSURE="0" STATE="1" EDITORDER="1 " ATTDECLTYP="2" ATTVALUE="&apos;RECA&apos;" ATTEXPVIRT="0" TYPTYPE="1" TYPE="STRING" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="C_SLG0_SUBOBJECT" VERSION="1" LANGU="E" DESCRIPT="SLG0 Subobject" EXPOSURE="0" STATE="1" EDITORDER="2 " ATTDECLTYP="2" ATTVALUE="&apos;MISC&apos;" ATTEXPVIRT="0" TYPTYPE="1" TYPE="STRING" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="C_STATUS_ERROR" VERSION="1" LANGU="E" DESCRIPT="Found errors" EXPOSURE="2" STATE="1" EDITORDER="8 " ATTDECLTYP="2" ATTVALUE="&apos;ERROR&apos;" ATTEXPVIRT="0" TYPTYPE="1" TYPE="STRING" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="C_STATUS_NEW" VERSION="1" LANGU="E" DESCRIPT="Document header before post or check" EXPOSURE="2" STATE="1" EDITORDER="5 " ATTDECLTYP="2" ATTVALUE="&apos;NEW&apos;" ATTEXPVIRT="0" TYPTYPE="1" TYPE="STRING" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="C_STATUS_OK" VERSION="1" LANGU="E" DESCRIPT="Processed with no error" EXPOSURE="2" STATE="1" EDITORDER="6 " ATTDECLTYP="2" ATTVALUE="&apos;OK&apos;" ATTEXPVIRT="0" TYPTYPE="1" TYPE="STRING" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="C_STATUS_WARNING" VERSION="1" LANGU="E" DESCRIPT="Found warnings" EXPOSURE="2" STATE="1" EDITORDER="7 " ATTDECLTYP="2" ATTVALUE="&apos;WARNING&apos;" ATTEXPVIRT="0" TYPTYPE="1" TYPE="STRING" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="N_ACCPOST_TABIX" VERSION="1" LANGU="E" DESCRIPT="Actual SY-TABIX of T_ACCPOST" EXPOSURE="1" STATE="1" EDITORDER="17 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="SY-TABIX" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="N_ITEMNO_ACC" VERSION="1" LANGU="E" DESCRIPT="Accounting Document Line Item Number" EXPOSURE="1" STATE="1" EDITORDER="16 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="POSNR_ACC" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="R_MSG_LOG" VERSION="1" LANGU="E" DESCRIPT="Message Collector" EXPOSURE="2" STATE="1" EDITORDER="1 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="3" TYPE="IF_RECA_MESSAGE_LIST" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="S_CUSTOMERCPD" VERSION="1" LANGU="E" DESCRIPT="Posting in accounting: Partner billing doc (load receivable)" EXPOSURE="1" STATE="1" EDITORDER="15 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="BAPIACPA09" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="S_DOCUMENTHEADER" VERSION="1" LANGU="E" DESCRIPT="Header" EXPOSURE="1" STATE="1" EDITORDER="14 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="BAPIACHE09" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_ACCOUNTGL" VERSION="1" LANGU="E" DESCRIPT="G/L account items" EXPOSURE="1" STATE="1" EDITORDER="1 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="4 " SRCCOLUMN1="4 " SRCROW2="4 " SRCCOLUMN2="48 " TYPESRC_LENG="47 " TYPESRC="T_ACCOUNTGL type STANDARD TABLE OF BAPIACGL09
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_ACCOUNTPAYABLE" VERSION="1" LANGU="E" DESCRIPT="Vendor Items" EXPOSURE="1" STATE="1" EDITORDER="3 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="8 " SRCCOLUMN1="4 " SRCROW2="8 " SRCCOLUMN2="53 " TYPESRC_LENG="52 " TYPESRC="T_ACCOUNTPAYABLE type STANDARD TABLE OF BAPIACAP09
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_ACCOUNTRECEIVABLE" VERSION="1" LANGU="E" DESCRIPT="Customer Items" EXPOSURE="1" STATE="1" EDITORDER="2 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="6 " SRCCOLUMN1="4 " SRCROW2="6 " SRCCOLUMN2="56 " TYPESRC_LENG="55 " TYPESRC="T_ACCOUNTRECEIVABLE type STANDARD TABLE OF BAPIACAR09
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_ACCOUNTTAX" VERSION="1" LANGU="E" DESCRIPT="Tax items" EXPOSURE="1" STATE="1" EDITORDER="4 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="10 " SRCCOLUMN1="4 " SRCROW2="10 " SRCCOLUMN2="49 " TYPESRC_LENG="48 " TYPESRC="T_ACCOUNTTAX type STANDARD TABLE OF BAPIACTX09
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_ACCOUNTWT" VERSION="1" LANGU="E" DESCRIPT="Withholding tax information for FI Interface" EXPOSURE="1" STATE="1" EDITORDER="13 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="28 " SRCCOLUMN1="4 " SRCROW2="28 " SRCCOLUMN2="48 " TYPESRC_LENG="47 " TYPESRC="T_ACCOUNTWT type STANDARD TABLE OF BAPIACWT09
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_ACCPOST" VERSION="1" LANGU="E" DESCRIPT="Main structure for ZCL_SIMPLE_ACC_POST" EXPOSURE="2" STATE="1" EDITORDER="2 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="TT_ACCPOST" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_ACCPOST_DOC" VERSION="1" LANGU="E" DESCRIPT="Status and reference to created documents" EXPOSURE="2" STATE="1" EDITORDER="3 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="TT_ACCPOST_DOC" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_ACCPOST_MSG" VERSION="1" LANGU="E" DESCRIPT="Collect messages returned by each execution of standard BAPI" EXPOSURE="2" STATE="1" EDITORDER="4 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="TT_ACCPOST_MSG" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_CONTRACTITEM" VERSION="1" LANGU="E" DESCRIPT="Additional Contract Accounts Recieviable and Payable Docs" EXPOSURE="1" STATE="1" EDITORDER="10 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="22 " SRCCOLUMN1="4 " SRCROW2="22 " SRCCOLUMN2="51 " TYPESRC_LENG="50 " TYPESRC="T_CONTRACTITEM type STANDARD TABLE OF BAPIACCAIT
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_CRITERIA" VERSION="1" LANGU="E" DESCRIPT="CO-PA Account Assignment Characteristics" EXPOSURE="1" STATE="1" EDITORDER="6 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="14 " SRCCOLUMN1="4 " SRCROW2="14 " SRCCOLUMN2="47 " TYPESRC_LENG="46 " TYPESRC="T_CRITERIA type STANDARD TABLE OF BAPIACKEC9
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_CURRENCYAMOUNT" VERSION="1" LANGU="E" DESCRIPT="Currency Items" EXPOSURE="1" STATE="1" EDITORDER="5 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="12 " SRCCOLUMN1="4 " SRCROW2="12 " SRCCOLUMN2="53 " TYPESRC_LENG="52 " TYPESRC="T_CURRENCYAMOUNT type STANDARD TABLE OF BAPIACCR09
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_EXTENSION1" VERSION="1" LANGU="E" DESCRIPT="Container for &apos;Customer Exit&apos; Parameters" EXPOSURE="1" STATE="1" EDITORDER="8 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="18 " SRCCOLUMN1="4 " SRCROW2="18 " SRCCOLUMN2="49 " TYPESRC_LENG="48 " TYPESRC="T_EXTENSION1 type STANDARD TABLE OF BAPIACEXTC
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_EXTENSION2" VERSION="1" LANGU="E" DESCRIPT="Reference Structure for BAPI Parameters EXTENSIONIN/EXTENSIO" EXPOSURE="1" STATE="1" EDITORDER="11 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="24 " SRCCOLUMN1="4 " SRCROW2="24 " SRCCOLUMN2="48 " TYPESRC_LENG="47 " TYPESRC="T_EXTENSION2 type STANDARD TABLE OF BAPIPAREX
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_PAYMENTCARD" VERSION="1" LANGU="E" DESCRIPT="Payment Card Informations" EXPOSURE="1" STATE="1" EDITORDER="9 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="20 " SRCCOLUMN1="4 " SRCROW2="20 " SRCCOLUMN2="50 " TYPESRC_LENG="49 " TYPESRC="T_PAYMENTCARD type STANDARD TABLE OF BAPIACPC09
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_REALESTATE" VERSION="1" LANGU="E" DESCRIPT="Real Estate Account Assignment Data" EXPOSURE="1" STATE="1" EDITORDER="12 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="26 " SRCCOLUMN1="4 " SRCROW2="26 " SRCCOLUMN2="49 " TYPESRC_LENG="48 " TYPESRC="T_REALESTATE type STANDARD TABLE OF BAPIACRE09
+"/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_RETURN" VERSION="1" LANGU="E" DESCRIPT="Return parameter table" EXPOSURE="1" STATE="1" EDITORDER="18 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="BAPIRET2_T" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="T_VALUEFIELD" VERSION="1" LANGU="E" DESCRIPT="CO-PA Account Assignment Value Fields" EXPOSURE="1" STATE="1" EDITORDER="7 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="16 " SRCCOLUMN1="4 " SRCROW2="16 " SRCCOLUMN2="49 " TYPESRC_LENG="48 " TYPESRC="T_VALUEFIELD type STANDARD TABLE OF BAPIACKEV9
+"/>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="BDC_POST" VERSION="1" LANGU="E" DESCRIPT="Post document with BDC" EXPOSURE="2" STATE="1" EDITORDER="0 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="BDC_POST" SCONAME="IV_CLIPBOARD_DATA" VERSION="1" LANGU="E" DESCRIPT="Post clipboard data" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ABAP_BOOL" PARVALUE="ABAP_FALSE"/>
+   <source>METHOD BDC_POST.
+  DATA: LS_ACCPOST TYPE LINE OF ME-&gt;TT_ACCPOST,
+        LT_ACCPOST_AUX TYPE ME-&gt;TT_ACCPOST,
+        LS_ACCPOST_AUX TYPE LINE OF ME-&gt;TT_ACCPOST,
+        LS_ACCPOST_DOC TYPE LINE OF ME-&gt;TT_ACCPOST_DOC,
+        LC_WRBTR_OUT type c LENGTH 20.
+
+  DATA:
+    LR_BDC       TYPE REF TO ZCL_BC_BDC,
+    LT_MESSAGES  TYPE TAB_BDCMSGCOLL,
+    LS_MESSAGE   LIKE LINE OF LT_MESSAGES,
+    LV_SUBRC     TYPE SY-SUBRC,
+    LR_EXCEPTION TYPE REF TO ZCX_BATCH_INPUT_ERROR,
+    LC_ERROR     TYPE STRING.
+
+  &quot; Populate data from clipboard into LT_ACCPOST
+  IF IV_CLIPBOARD_DATA = ABAP_TRUE.
+    CLEAR ME-&gt;T_ACCPOST.
+    ME-&gt;FILL_T_ACCPOST_WITH_CLIPDATA( ).
+  ENDIF.
+
+  &quot; Check number of items to post
+  IF LINES( ME-&gt;T_ACCPOST ) = 0.
+    ME-&gt;R_MSG_LOG-&gt;ADD(
+      EXPORTING
+        ID_MSGTY = &apos;E&apos; ID_MSGID = &apos;00&apos; ID_MSGNO = &apos;398&apos;
+        ID_MSGV1 = &apos;Nothing to post&apos;
+    ).
+    RETURN.
+  ENDIF.
+
+  ZCX_FI=&gt;POPUP_TABLA(
+    EXPORTING
+      I_HEADER = &apos;bdc_post t_accpost&apos;
+    CHANGING
+      CT_TABLA = ME-&gt;T_ACCPOST
+  ).
+
+
+  &quot; Group all items without ID into &apos;Accounting_Document&apos;. Let ID_ACCDOS be a non-required field
+  CLEAR LS_ACCPOST.
+  LS_ACCPOST-ID_ACCDOC = &apos;Accounting_Document&apos;.
+  MODIFY ME-&gt;T_ACCPOST FROM LS_ACCPOST TRANSPORTING ID_ACCDOC WHERE ID_ACCDOC IS INITIAL.
+
+  &quot; Initialize returning tables and message collector
+  CLEAR ME-&gt;T_ACCPOST_DOC.
+  CLEAR ME-&gt;T_ACCPOST_MSG.
+  ME-&gt;R_MSG_LOG-&gt;CLEAR( ).
+
+  &quot; Select distint values of ID_ACCDOC into LT_ACCPOST_AUX
+  LT_ACCPOST_AUX[] = ME-&gt;T_ACCPOST[].
+  SORT LT_ACCPOST_AUX BY ID_ACCDOC.
+  DELETE ADJACENT DUPLICATES FROM LT_ACCPOST_AUX COMPARING ID_ACCDOC.
+
+  &quot; Create BDC Object
+  LR_BDC = ZCL_BC_BDC=&gt;S_INSTANTIATE( IM_BDC_TYPE = &apos;BI&apos;
+                                      IM_TCODE    = &apos;FB01&apos;
+                                      IM_GROUP    = &apos;SIMPLE_POST&apos;
+                                      IM_KEEP     = &apos;X&apos;
+                                      IM_HOLDDATE = SY-DATUM ).
+
+  &quot; Call new BDC for each distinct ID_ACCDOC
+  LOOP AT LT_ACCPOST_AUX INTO LS_ACCPOST_AUX.
+
+    &quot; Internal ID of document
+    ME-&gt;N_ACCPOST_TABIX = SY-TABIX.
+
+    CLEAR LS_ACCPOST_DOC.
+
+    LS_ACCPOST_DOC-ID_ACCDOC = LS_ACCPOST_AUX-ID_ACCDOC.
+    LS_ACCPOST_DOC-LOG_NO = ME-&gt;N_ACCPOST_TABIX.
+    LS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_NEW.
+
+
+    &quot; Add LOG to message collector
+    ME-&gt;R_MSG_LOG-&gt;ADD(
+      EXPORTING
+        ID_MSGTY = &apos;S&apos; ID_MSGID = &apos;ZFSAP&apos; ID_MSGNO = &apos;000&apos;
+        ID_MSGV1 = &apos;Accounting document ID: &apos;
+        ID_MSGV2 = |{ LS_ACCPOST_AUX-ID_ACCDOC }|
+    ).
+
+
+*   Populate first screen
+    LR_BDC-&gt;ADD_SCREEN( IM_REPID = &apos;SAPMF05A&apos; IM_DYNNR = &apos;0100&apos; ).
+
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BDC_CURSOR&apos;  IM_VAL = &apos;RF05A-NEWUM&apos; ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BDC_OKCODE&apos;  IM_VAL = &apos;00&apos; ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BKPF-BLDAT&apos;  IM_VAL = LS_ACCPOST_AUX-BLDAT IM_CONV = &apos;D&apos; ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BKPF-BLART&apos;  IM_VAL = LS_ACCPOST_AUX-BLART ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BKPF-BUKRS&apos;  IM_VAL = LS_ACCPOST_AUX-BUKRS ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BKPF-BUDAT&apos;  IM_VAL = LS_ACCPOST_AUX-BUDAT IM_CONV = &apos;D&apos; ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BKPF-WAERS&apos;  IM_VAL = LS_ACCPOST_AUX-WAERS ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BKPF-XBLNR&apos;  IM_VAL = LS_ACCPOST_AUX-XBLNR ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BKPF-BKTXT&apos;  IM_VAL = LS_ACCPOST_AUX-BKTXT ).
+
+
+    ME-&gt;N_ITEMNO_ACC = 1.
+    LOOP AT ME-&gt;T_ACCPOST INTO LS_ACCPOST WHERE ID_ACCDOC = LS_ACCPOST_AUX-ID_ACCDOC.
+
+
+      IF LS_ACCPOST-UMSKS IS NOT INITIAL.
+
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWUM&apos; IM_VAL = LS_ACCPOST-UMSKS ).
+
+        IF LS_ACCPOST-LIFNR IS NOT INITIAL.
+          IF LS_ACCPOST-WRBTR &lt; 0.
+            LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;39&apos; ).
+          ELSE.
+            LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;29&apos; ).
+          ENDIF.
+          LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWKO&apos; IM_VAL = LS_ACCPOST-LIFNR ).
+        ENDIF.
+        IF LS_ACCPOST-KUNNR IS NOT INITIAL.
+          IF LS_ACCPOST-WRBTR &lt; 0.
+            LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;19&apos; ).
+          ELSE.
+            LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;09&apos; ).
+          ENDIF.
+          LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWKO&apos; IM_VAL = LS_ACCPOST-KUNNR ).
+        ENDIF.
+
+      ELSE.
+
+        IF LS_ACCPOST-LIFNR IS NOT INITIAL.
+          IF LS_ACCPOST-WRBTR &lt; 0.
+            LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;31&apos; ).
+          ELSE.
+            LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;21&apos; ).
+          ENDIF.
+          LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWKO&apos; IM_VAL = LS_ACCPOST-LIFNR ).
+        ENDIF.
+        IF LS_ACCPOST-KUNNR IS NOT INITIAL.
+          IF LS_ACCPOST-WRBTR &lt; 0.
+            LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;11&apos; ).
+          ELSE.
+            LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;01&apos; ).
+          ENDIF.
+          LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWKO&apos; IM_VAL = LS_ACCPOST-KUNNR ).
+        ENDIF.
+
+      ENDIF.
+
+      IF LS_ACCPOST-HKONT IS NOT INITIAL.
+        IF LS_ACCPOST-WRBTR &lt; 0.
+          LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;50&apos; ).
+        ELSE.
+          LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWBS&apos; IM_VAL = &apos;40&apos; ).
+        ENDIF.
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;RF05A-NEWKO&apos; IM_VAL = LS_ACCPOST-HKONT ).
+      ENDIF.
+
+      &quot; Always positive
+      IF LS_ACCPOST-WRBTR &lt; 0.
+        LS_ACCPOST-WRBTR = LS_ACCPOST-WRBTR * -1.
+      ENDIF.
+
+      &quot; Format number
+      WRITE LS_ACCPOST-WRBTR TO LC_WRBTR_OUT DECIMALS 2 LEFT-JUSTIFIED.
+
+
+      IF LS_ACCPOST-HKONT IS NOT INITIAL.
+        LR_BDC-&gt;ADD_SCREEN( IM_REPID = &apos;SAPMF05A&apos; IM_DYNNR = &apos;0300&apos; ).
+
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BDC_CURSOR&apos;  IM_VAL = &apos;RF05A-NEWKO&apos; ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BDC_OKCODE&apos;  IM_VAL = &apos;/00&apos; ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-WRBTR&apos;  IM_VAL = LC_WRBTR_OUT ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-ZUONR&apos;  IM_VAL = LS_ACCPOST-ZUONR ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-SGTXT&apos;  IM_VAL = LS_ACCPOST-SGTXT ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;DKACB-FMORE&apos; IM_VAL = &apos; &apos; IM_CONV = &apos;S&apos; ).
+      ENDIF.
+
+*     Populate MORE DATA
+      IF LS_ACCPOST-KUNNR IS NOT INITIAL OR LS_ACCPOST-LIFNR IS NOT INITIAL..
+        LR_BDC-&gt;ADD_SCREEN( IM_REPID = &apos;SAPMF05A&apos; IM_DYNNR = &apos;2320&apos; ).
+
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BDC_CURSOR&apos;  IM_VAL = &apos;BSED-WBANK&apos; ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BDC_OKCODE&apos;  IM_VAL = &apos;=ZK&apos; ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-WRBTR&apos;  IM_VAL = LC_WRBTR_OUT ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-ZUONR&apos;  IM_VAL = LS_ACCPOST-ZUONR ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-SGTXT&apos;  IM_VAL = LS_ACCPOST-SGTXT ).
+      ENDIF.
+
+      IF LS_ACCPOST-UMSKS IS NOT INITIAL.
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-ZFBDT&apos;  IM_VAL = LS_ACCPOST-ZFBDT IM_CONV = &apos;D&apos; ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSED-WDATE&apos;  IM_VAL = LS_ACCPOST-BLDAT IM_CONV = &apos;D&apos; ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSED-WBANK&apos;  IM_VAL = &apos;-&apos; ).
+      ENDIF.
+
+
+      IF LS_ACCPOST-KUNNR IS NOT INITIAL.
+        LR_BDC-&gt;ADD_SCREEN( IM_REPID = &apos;SAPMF05A&apos; IM_DYNNR = &apos;0331&apos; ).
+
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-XREF1&apos;  IM_VAL = LS_ACCPOST-XREF1 ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-XREF2&apos;  IM_VAL = LS_ACCPOST-XREF2 ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-XREF3&apos;  IM_VAL = LS_ACCPOST-XREF3 ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-HBKID&apos;  IM_VAL = LS_ACCPOST-HBKID ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-HKTID&apos;  IM_VAL = LS_ACCPOST-HKTID ).
+      ENDIF.
+
+      IF LS_ACCPOST-LIFNR IS NOT INITIAL.
+        LR_BDC-&gt;ADD_SCREEN( IM_REPID = &apos;SAPMF05A&apos; IM_DYNNR = &apos;0332&apos; ).
+
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-XREF1&apos;  IM_VAL = LS_ACCPOST-XREF1 ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-XREF2&apos;  IM_VAL = LS_ACCPOST-XREF2 ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-XREF3&apos;  IM_VAL = LS_ACCPOST-XREF3 ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-HBKID&apos;  IM_VAL = LS_ACCPOST-HBKID ).
+        LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BSEG-HKTID&apos;  IM_VAL = LS_ACCPOST-HKTID ).
+      ENDIF.
+
+
+    ENDLOOP.
+
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;DKACB-FMORE&apos; IM_VAL = &apos; &apos; IM_CONV = &apos;S&apos; ).
+    LR_BDC-&gt;ADD_FIELD( IM_FLD = &apos;BDC_OKCODE&apos;  IM_VAL = &apos;=BU&apos; ).
+
+    TRY.
+
+        LR_BDC-&gt;PROCESS( ).
+
+        ME-&gt;R_MSG_LOG-&gt;ADD(
+          EXPORTING
+            ID_MSGTY = &apos;S&apos; ID_MSGID = &apos;00&apos; ID_MSGNO = &apos;398&apos;
+            ID_MSGV1 = |OK { LS_ACCPOST_DOC-ID_ACCDOC }|
+        ).
+
+      CATCH ZCX_BATCH_INPUT_ERROR INTO LR_EXCEPTION.
+        ME-&gt;R_MSG_LOG-&gt;ADD_FROM_EXCEPTION( EXPORTING IO_EXCEPTION = LR_EXCEPTION ).
+    ENDTRY.
+
+    LR_BDC-&gt;CLEAR_BDC_DATA( ).
+
+
+    APPEND LS_ACCPOST_DOC TO ME-&gt;T_ACCPOST_DOC.
+
+  ENDLOOP.
+
+  &quot; Store logs in database
+  ME-&gt;R_MSG_LOG-&gt;STORE(
+    EXCEPTIONS
+      ERROR             = 1
+      OTHERS            = 2
+  ).
+  IF SY-SUBRC &lt;&gt; 0.
+  ENDIF.
+
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="CALL_BAPI" VERSION="1" LANGU="E" DESCRIPT="Call BAPI_ACC_DOCUMENT_POST and fill auxiliary tables" EXPOSURE="1" STATE="1" EDITORDER="2 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="CALL_BAPI" SCONAME="IV_CHECK" VERSION="1" LANGU="E" DESCRIPT="Only check posting" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ABAP_BOOL" PARVALUE="ABAP_FALSE"/>
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="CALL_BAPI" SCONAME="CS_ACCPOST_DOC" VERSION="1" LANGU="E" DESCRIPT="Accounting Document information" CMPTYPE="1" MTDTYPE="0" EDITORDER="2 " DISPID="0 " PARDECLTYP="2" PARPASSTYP="1" TYPTYPE="1" TYPE="TY_ACCPOST_DOC"/>
+   <source>METHOD CALL_BAPI.
+  DATA: LS_RETURN   TYPE BAPIRET2,
+        LS_ACCPOST  TYPE ZFIS_SIMPLE_ACCPOST,
+        LV_OBJ_TYPE TYPE BAPIACHE02-OBJ_TYPE,
+        LV_OBJ_KEY  TYPE BAPIACHE02-OBJ_KEY,
+        LV_OBJ_SYS  TYPE BAPIACHE02-OBJ_SYS.
+
+  &quot; Initialize
+  CLEAR ME-&gt;T_RETURN.
+
+  &quot; Check or Post
+  IF IV_CHECK = ABAP_TRUE.
+
+    CALL FUNCTION &apos;BAPI_ACC_DOCUMENT_CHECK&apos;
+      EXPORTING
+        DOCUMENTHEADER    = ME-&gt;S_DOCUMENTHEADER
+        CUSTOMERCPD       = ME-&gt;S_CUSTOMERCPD
+*       CONTRACTHEADER    =
+      TABLES
+        ACCOUNTGL         = ME-&gt;T_ACCOUNTGL
+        ACCOUNTRECEIVABLE = ME-&gt;T_ACCOUNTRECEIVABLE
+        ACCOUNTPAYABLE    = ME-&gt;T_ACCOUNTPAYABLE
+        ACCOUNTTAX        = ME-&gt;T_ACCOUNTTAX
+        CURRENCYAMOUNT    = ME-&gt;T_CURRENCYAMOUNT
+*       CRITERIA          =
+*       VALUEFIELD        =
+        EXTENSION1        = ME-&gt;T_EXTENSION1
+        RETURN            = ME-&gt;T_RETURN
+*       PAYMENTCARD       =
+*       CONTRACTITEM      =
+*       EXTENSION2        =
+*       REALESTATE        =
+        ACCOUNTWT         = ME-&gt;T_ACCOUNTWT
+      .
+
+  ELSE.
+
+    CALL FUNCTION &apos;BAPI_ACC_DOCUMENT_POST&apos;
+      EXPORTING
+        DOCUMENTHEADER    = ME-&gt;S_DOCUMENTHEADER
+        CUSTOMERCPD       = ME-&gt;S_CUSTOMERCPD
+*       CONTRACTHEADER    =
+      IMPORTING
+        OBJ_TYPE          = LV_OBJ_TYPE
+        OBJ_KEY           = LV_OBJ_KEY
+        OBJ_SYS           = LV_OBJ_SYS
+      TABLES
+        ACCOUNTGL         = ME-&gt;T_ACCOUNTGL
+        ACCOUNTRECEIVABLE = ME-&gt;T_ACCOUNTRECEIVABLE
+        ACCOUNTPAYABLE    = ME-&gt;T_ACCOUNTPAYABLE
+        ACCOUNTTAX        = ME-&gt;T_ACCOUNTTAX
+        CURRENCYAMOUNT    = ME-&gt;T_CURRENCYAMOUNT
+*       CRITERIA          =
+*       VALUEFIELD        =
+        EXTENSION1        = ME-&gt;T_EXTENSION1
+        RETURN            = ME-&gt;T_RETURN
+*       PAYMENTCARD       =
+*       CONTRACTITEM      =
+*       EXTENSION2        =
+*       REALESTATE        =
+        ACCOUNTWT         = ME-&gt;T_ACCOUNTWT
+      .
+
+  ENDIF.
+
+  &quot; Update status of accounting document
+  CS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_OK.
+  LOOP AT ME-&gt;T_RETURN INTO LS_RETURN.
+    CASE LS_RETURN-TYPE.
+      WHEN &apos;W&apos;.
+        CS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_WARNING.
+      WHEN &apos;E&apos;.
+        CS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_ERROR.
+        EXIT.
+      WHEN &apos;A&apos;.
+        CS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_ERROR.
+        EXIT.
+    ENDCASE.
+  ENDLOOP.
+
+  &quot; Fill document reference and commit data
+  IF IV_CHECK = ABAP_FALSE AND CS_ACCPOST_DOC-STATUS &lt;&gt; ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_ERROR.
+
+    &quot; Document created
+    CS_ACCPOST_DOC-BUKRS = LV_OBJ_KEY+10(4).
+    CS_ACCPOST_DOC-BELNR = LV_OBJ_KEY(10).
+    CS_ACCPOST_DOC-GJAHR = LV_OBJ_KEY+14(4).
+    CS_ACCPOST_DOC-AWTYP = LV_OBJ_TYPE.
+    CS_ACCPOST_DOC-AWKEY = LV_OBJ_KEY.
+    CS_ACCPOST_DOC-AWSYS = LV_OBJ_SYS.
+
+    &quot; Update main table
+    LOOP AT ME-&gt;T_ACCPOST INTO LS_ACCPOST WHERE ID_ACCDOC = CS_ACCPOST_DOC-ID_ACCDOC.
+      LS_ACCPOST-AWTYP = CS_ACCPOST_DOC-AWTYP.
+      LS_ACCPOST-AWKEY = CS_ACCPOST_DOC-AWKEY.
+      LS_ACCPOST-AWSYS = CS_ACCPOST_DOC-AWSYS.
+      MODIFY ME-&gt;T_ACCPOST FROM LS_ACCPOST.
+    ENDLOOP.
+
+    CALL FUNCTION &apos;BAPI_TRANSACTION_COMMIT&apos;.
+
+  ENDIF.
+
+  &quot; Link results with document header.
+  LOOP AT ME-&gt;T_RETURN INTO LS_RETURN.
+    LS_RETURN-LOG_NO = CS_ACCPOST_DOC-LOG_NO.
+    MODIFY ME-&gt;T_RETURN FROM LS_RETURN.
+  ENDLOOP.
+
+  &quot; Append results to message collector
+  ME-&gt;R_MSG_LOG-&gt;ADD_FROM_BAPI( IT_BAPIRET = ME-&gt;T_RETURN ).
+
+  &quot; Append results to auxiliary results table.
+  INSERT LINES OF ME-&gt;T_RETURN INTO TABLE ME-&gt;T_ACCPOST_MSG.
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="CONSTRUCTOR" VERSION="1" LANGU="E" EXPOSURE="2" STATE="1" EDITORDER="3 " DISPID="0 " MTDTYPE="2" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="CONSTRUCTOR" SCONAME="IR_MSG_LOG" VERSION="1" LANGU="E" DESCRIPT="Message Collector" CMPTYPE="1" MTDTYPE="2" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="3" TYPE="IF_RECA_MESSAGE_LIST" PAROPTIONL="X"/>
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="CONSTRUCTOR" SCONAME="IV_CHECK" VERSION="1" LANGU="E" DESCRIPT="Only check posting" CMPTYPE="1" MTDTYPE="2" EDITORDER="2 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ABAP_BOOL" PARVALUE="ABAP_FALSE"/>
+   <source>METHOD CONSTRUCTOR.
+
+  IF IR_MSG_LOG IS INITIAL.
+
+    &quot; Create a new message collector
+    ME-&gt;R_MSG_LOG = CF_RECA_MESSAGE_LIST=&gt;CREATE(
+        ID_OBJECT       = |{ ZCL_SIMPLE_ACC_POST=&gt;C_SLG0_OBJECT }|
+        ID_SUBOBJECT    = |{ ZCL_SIMPLE_ACC_POST=&gt;C_SLG0_SUBOBJECT }|
+*        ID_EXTNUMBER    =
+*        ID_DELDATE      = RECA0_DATE-MIN
+*        IF_DELNOTBEFORE = ABAP_FALSE
+    ).
+
+  ELSE.
+    ME-&gt;R_MSG_LOG = IR_MSG_LOG.
+  ENDIF.
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="DISPLAY_LOG" VERSION="1" LANGU="E" DESCRIPT="Show messages of message collector" EXPOSURE="2" STATE="1" EDITORDER="2 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <source>METHOD DISPLAY_LOG.
+  DATA: LV_BALLOGHNDL TYPE BALLOGHNDL,
+        LT_BAL_T_LOGH TYPE BAL_T_LOGH.
+
+
+  &quot; Check if message collector is empty
+  IF ME-&gt;R_MSG_LOG-&gt;IS_EMPTY( ) = ABAP_TRUE.
+    RETURN.
+  ENDIF.
+
+  &quot; Add handle of messages collected to a table
+  LV_BALLOGHNDL = ME-&gt;R_MSG_LOG-&gt;GET_HANDLE( ).
+  APPEND LV_BALLOGHNDL TO LT_BAL_T_LOGH.
+
+  &quot; Show messages
+  CALL FUNCTION &apos;BAL_DSP_LOG_DISPLAY&apos;
+    EXPORTING
+      I_T_LOG_HANDLE       = LT_BAL_T_LOGH    &quot; Restrict display by log handle
+    EXCEPTIONS
+      PROFILE_INCONSISTENT = 1
+      INTERNAL_ERROR       = 2
+      NO_DATA_AVAILABLE    = 3
+      NO_AUTHORITY         = 4
+      OTHERS               = 5.
+
+  IF SY-SUBRC &lt;&gt; 0.
+    RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+      EXPORTING
+        TEXTID = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+        ATTR1  = &apos;Error displaying message collector. &apos;
+        ATTR2  = |{ SY-SUBRC }|.
+  ENDIF.
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="DISPLAY_RESULT" VERSION="1" LANGU="E" DESCRIPT="Show a dialog box with posting details" EXPOSURE="2" STATE="1" EDITORDER="1 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <source>METHOD DISPLAY_RESULT.
+  DATA: LO_RESULT TYPE REF TO LCL_RESULT.
+
+  CREATE OBJECT LO_RESULT
+    EXPORTING
+      IT_ACCPOST_DOC = ME-&gt;T_ACCPOST_DOC
+      IT_ACCPOST     = ME-&gt;T_ACCPOST
+      IT_ACCPOST_MSG = ME-&gt;T_ACCPOST_MSG.
+
+  LO_RESULT-&gt;DISPLAY( ).
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTGL" VERSION="1" LANGU="E" DESCRIPT="Fill BAPI table ACCOUNTGL" EXPOSURE="1" STATE="1" EDITORDER="3 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTGL" SCONAME="IS_ACCPOST" VERSION="1" LANGU="E" DESCRIPT="Main structure for ZCL_SIMPLE_ACC_POST" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ZFIS_SIMPLE_ACCPOST"/>
+   <source>METHOD FILL_ACCOUNTGL.
+  DATA: LS_ACCOUNTGL TYPE BAPIACGL09,
+        LS_CURRENCYAMOUNT TYPE BAPIACCR09.
+
+
+  CLEAR LS_ACCOUNTGL.
+
+  LS_ACCOUNTGL-ITEMNO_ACC       = ME-&gt;N_ITEMNO_ACC.    &quot; Accounting Document Line Item Number
+  LS_ACCOUNTGL-GL_ACCOUNT       = IS_ACCPOST-HKONT.    &quot; General Ledger Account
+  LS_ACCOUNTGL-ITEM_TEXT        = IS_ACCPOST-SGTXT.    &quot; Item Text
+* LS_ACCOUNTGL-STAT_CON         =                      &quot; Indicator for statistical line items
+* LS_ACCOUNTGL-LOG_PROC         =                      &quot; Logical Transaction
+* LS_ACCOUNTGL-AC_DOC_NO        =                      &quot; Accounting Document Number
+  LS_ACCOUNTGL-REF_KEY_1        = IS_ACCPOST-XREF1.    &quot; Business Partner Reference Key
+  LS_ACCOUNTGL-REF_KEY_2        = IS_ACCPOST-XREF2.    &quot; Business Partner Reference Key
+  LS_ACCOUNTGL-REF_KEY_3        = IS_ACCPOST-XREF3.    &quot; Reference Key for Line Item
+* LS_ACCOUNTGL-ACCT_KEY         =                      &quot; Transaction Key
+* LS_ACCOUNTGL-ACCT_TYPE        =                      &quot; Account Type
+  LS_ACCOUNTGL-DOC_TYPE         = IS_ACCPOST-BLART.    &quot; Document Type
+* LS_ACCOUNTGL-COMP_CODE        =                      &quot; Company Code
+* LS_ACCOUNTGL-BUS_AREA         =                      &quot; Business Area
+* LS_ACCOUNTGL-FUNC_AREA        =                      &quot; Functional Area
+* LS_ACCOUNTGL-PLANT            =                      &quot; Plant
+* LS_ACCOUNTGL-FIS_PERIOD       =                      &quot; Fiscal Period
+* LS_ACCOUNTGL-FISC_YEAR        =                      &quot; Fiscal Year
+  LS_ACCOUNTGL-PSTNG_DATE       = IS_ACCPOST-BUDAT.    &quot; Posting Date in the Document
+  LS_ACCOUNTGL-VALUE_DATE       = IS_ACCPOST-VALUT.    &quot; Value Date
+* LS_ACCOUNTGL-FM_AREA          =                      &quot; Financial Management Area
+* LS_ACCOUNTGL-CUSTOMER         =                      &quot; Customer Number
+* LS_ACCOUNTGL-CSHDIS_IND       =                      &quot; Indicator: Line Item Not Liable to Cash Discount?
+* LS_ACCOUNTGL-VENDOR_NO        =                      &quot; Account Number of Vendor or Creditor
+  LS_ACCOUNTGL-ALLOC_NMBR       = IS_ACCPOST-ZUONR.    &quot; Assignment Number
+  LS_ACCOUNTGL-TAX_CODE         = IS_ACCPOST-MWSKZ.    &quot; Tax on sales/purchases code
+* LS_ACCOUNTGL-TAXJURCODE       =                      &quot; Tax Jurisdiction
+* LS_ACCOUNTGL-EXT_OBJECT_ID    =                      &quot; Technical Key of External Object
+* LS_ACCOUNTGL-BUS_SCENARIO     =                      &quot; Business Scenario in Controlling for Logistical Objects
+* LS_ACCOUNTGL-COSTOBJECT       =                      &quot; Cost Object
+  LS_ACCOUNTGL-COSTCENTER       = IS_ACCPOST-KOSTL.    &quot; Cost Center
+* LS_ACCOUNTGL-ACTTYPE          =                      &quot; Activity Type
+* LS_ACCOUNTGL-PROFIT_CTR       =                      &quot; Profit Center
+* LS_ACCOUNTGL-PART_PRCTR       =                      &quot; Partner Profit Center
+* LS_ACCOUNTGL-NETWORK          =                      &quot; Network Number for Account Assignment
+  LS_ACCOUNTGL-WBS_ELEMENT      = IS_ACCPOST-POSID.    &quot; Work Breakdown Structure Element (WBS Element)
+* LS_ACCOUNTGL-ORDERID          =                      &quot; Order Number
+* LS_ACCOUNTGL-ORDER_ITNO       =                      &quot; Order Item Number
+* LS_ACCOUNTGL-ROUTING_NO       =                      &quot; Routing number of operations in the order
+* LS_ACCOUNTGL-ACTIVITY         =                      &quot; Operation/Activity Number
+* LS_ACCOUNTGL-COND_TYPE        =                      &quot; Condition type
+* LS_ACCOUNTGL-COND_COUNT       =                      &quot; Condition Counter
+* LS_ACCOUNTGL-COND_ST_NO       =                      &quot; Level Number
+* LS_ACCOUNTGL-FUND             =                      &quot; Fund
+* LS_ACCOUNTGL-FUNDS_CTR        =                      &quot; Funds Center
+* LS_ACCOUNTGL-CMMT_ITEM        =                      &quot; Commitment Item
+* LS_ACCOUNTGL-CO_BUSPROC       =                      &quot; Business Process
+* LS_ACCOUNTGL-ASSET_NO         =                      &quot; Main Asset Number
+* LS_ACCOUNTGL-SUB_NUMBER       =                      &quot; Asset Subnumber
+* LS_ACCOUNTGL-BILL_TYPE        =                      &quot; Billing Type
+* LS_ACCOUNTGL-SALES_ORD        =                      &quot; Sales Order Number
+* LS_ACCOUNTGL-S_ORD_ITEM       =                      &quot; Item Number in Sales Order
+* LS_ACCOUNTGL-DISTR_CHAN       =                      &quot; Distribution Channel
+* LS_ACCOUNTGL-DIVISION         =                      &quot; Division
+* LS_ACCOUNTGL-SALESORG         =                      &quot; Sales Organization
+* LS_ACCOUNTGL-SALES_GRP        =                      &quot; Sales Group
+* LS_ACCOUNTGL-SALES_OFF        =                      &quot; Sales Office
+* LS_ACCOUNTGL-SOLD_TO          =                      &quot; Sold-to party
+* LS_ACCOUNTGL-DE_CRE_IND       =                      &quot; Indicator: subsequent debit/credit
+* LS_ACCOUNTGL-P_EL_PRCTR       =                      &quot; Partner profit center for elimination of internal business
+* LS_ACCOUNTGL-XMFRW            =                      &quot; Indicator: Update quantity in RW
+* LS_ACCOUNTGL-QUANTITY         =                      &quot; Quantity
+* LS_ACCOUNTGL-BASE_UOM         =                      &quot; Base Unit of Measure
+* LS_ACCOUNTGL-BASE_UOM_ISO     =                      &quot; Base unit of measure in ISO code
+* LS_ACCOUNTGL-INV_QTY          =                      &quot; Actual Invoiced Quantity
+* LS_ACCOUNTGL-INV_QTY_SU       =                      &quot; Billing quantity in stockkeeping unit
+* LS_ACCOUNTGL-SALES_UNIT       =                      &quot; Sales unit
+* LS_ACCOUNTGL-SALES_UNIT_ISO   =                      &quot; Sales unit in ISO code
+* LS_ACCOUNTGL-PO_PR_QNT        =                      &quot; Quantity in order price quantity unit
+* LS_ACCOUNTGL-PO_PR_UOM        =                      &quot; Order price unit (purchasing)
+* LS_ACCOUNTGL-PO_PR_UOM_ISO    =                      &quot; Purchase order price unit in ISO code
+* LS_ACCOUNTGL-ENTRY_QNT        =                      &quot; Quantity in Unit of Entry
+* LS_ACCOUNTGL-ENTRY_UOM        =                      &quot; Unit of Entry
+* LS_ACCOUNTGL-ENTRY_UOM_ISO    =                      &quot; Unit of entry in ISO code
+* LS_ACCOUNTGL-VOLUME           =                      &quot; Volume
+* LS_ACCOUNTGL-VOLUMEUNIT       =                      &quot; Volume unit
+* LS_ACCOUNTGL-VOLUMEUNIT_ISO   =                      &quot; Volume unit in ISO code
+* LS_ACCOUNTGL-GROSS_WT         =                      &quot; Gross Weight
+* LS_ACCOUNTGL-NET_WEIGHT       =                      &quot; Net weight
+* LS_ACCOUNTGL-UNIT_OF_WT       =                      &quot; Weight unit
+* LS_ACCOUNTGL-UNIT_OF_WT_ISO   =                      &quot; Unit of weight in ISO code
+* LS_ACCOUNTGL-ITEM_CAT         =                      &quot; Item category in purchasing document
+* LS_ACCOUNTGL-MATERIAL         =                      &quot; Material Number
+* LS_ACCOUNTGL-MATL_TYPE        =                      &quot; Material Type
+* LS_ACCOUNTGL-MVT_IND          =                      &quot; Movement Indicator
+* LS_ACCOUNTGL-REVAL_IND        =                      &quot; Revaluation
+* LS_ACCOUNTGL-ORIG_GROUP       =                      &quot; Origin Group as Subdivision of Cost Element
+* LS_ACCOUNTGL-ORIG_MAT         =                      &quot; Material-related origin
+* LS_ACCOUNTGL-SERIAL_NO        =                      &quot; Sequential number of account assignment
+* LS_ACCOUNTGL-PART_ACCT        =                      &quot; Partner Account Number
+* LS_ACCOUNTGL-TR_PART_BA       =                      &quot; Trading Partner&apos;s Business Area
+  LS_ACCOUNTGL-TRADE_ID         = IS_ACCPOST-VBUND.    &quot; Company ID of Trading Partner
+* LS_ACCOUNTGL-VAL_AREA         =                      &quot; Valuation Area
+* LS_ACCOUNTGL-VAL_TYPE         =                      &quot; Valuation Type
+* LS_ACCOUNTGL-ASVAL_DATE       =                      &quot; Reference Date
+* LS_ACCOUNTGL-PO_NUMBER        =                      &quot; Purchasing Document Number
+* LS_ACCOUNTGL-PO_ITEM          =                      &quot; Item Number of Purchasing Document
+* LS_ACCOUNTGL-ITM_NUMBER       =                      &quot; Item number of the SD document
+* LS_ACCOUNTGL-COND_CATEGORY    =                      &quot; Condition Category (Examples: Tax, Freight, Price, Cost)
+* LS_ACCOUNTGL-FUNC_AREA_LONG   =                      &quot; Functional Area
+* LS_ACCOUNTGL-CMMT_ITEM_LONG   =                      &quot; Commitment Item
+* LS_ACCOUNTGL-GRANT_NBR        =                      &quot; Grant
+* LS_ACCOUNTGL-CS_TRANS_T       =                      &quot; Transaction Type
+* LS_ACCOUNTGL-MEASURE          =                      &quot; Funded Program
+* LS_ACCOUNTGL-SEGMENT          =                      &quot; Segment for Segmental Reporting
+* LS_ACCOUNTGL-PARTNER_SEGMENT  =                      &quot; Partner Segment for Segmental Reporting
+* LS_ACCOUNTGL-RES_DOC          =                      &quot; Document Number for Earmarked Funds
+* LS_ACCOUNTGL-RES_ITEM         =                      &quot; Earmarked Funds: Document Item
+* LS_ACCOUNTGL-BILLING_PERIOD_START_DATE =             &quot; Billing Period of Performance Start Date
+* LS_ACCOUNTGL-BILLING_PERIOD_END_DATE   =             &quot; Billing Period of Performance End Date
+* LS_ACCOUNTGL-PPA_EX_IND                =             &quot; PPA Exclude Indicator
+* LS_ACCOUNTGL-FASTPAY                   =             &quot; PPA Fast Pay Indicator
+* LS_ACCOUNTGL-PARTNER_GRANT_NBR         =             &quot; Partner Grant
+* LS_ACCOUNTGL-BUDGET_PERIOD             =             &quot; FM: Budget Period
+* LS_ACCOUNTGL-PARTNER_BUDGET_PERIOD     =             &quot; FM: Partner Budget Period
+* LS_ACCOUNTGL-PARTNER_FUND              =             &quot; Partner Fund
+* LS_ACCOUNTGL-ITEMNO_TAX                =             &quot; Document item number refering to tax document.
+* LS_ACCOUNTGL-PAYMENT_TYPE              =             &quot; Payment Type for Grantor
+* LS_ACCOUNTGL-EXPENSE_TYPE              =             &quot; Expense Type for Grantor
+* LS_ACCOUNTGL-PROGRAM_PROFILE           =             &quot; Grantor Program Profile
+
+  APPEND LS_ACCOUNTGL TO ME-&gt;T_ACCOUNTGL.
+
+  &quot; If item has a tax, we have to distribute gross amount between this position and corresponding tax position.
+  IF IS_ACCPOST-MWSKZ IS NOT INITIAL.
+    ME-&gt;FILL_ACCOUNTTAX( IS_ACCPOST = IS_ACCPOST ).
+  ELSE.
+
+    &quot; (BAPIACCR09) Currency Items
+    CLEAR LS_CURRENCYAMOUNT.
+
+    LS_CURRENCYAMOUNT-ITEMNO_ACC   = ME-&gt;N_ITEMNO_ACC.   &quot; Accounting Document Line Item Number
+    LS_CURRENCYAMOUNT-CURR_TYPE    = &apos;00&apos;.               &quot; Currency Type and Valuation View
+    LS_CURRENCYAMOUNT-CURRENCY     = IS_ACCPOST-WAERS.   &quot; Currency Key
+*   LS_CURRENCYAMOUNT-CURRENCY_ISO =                     &quot; ISO code currency
+    LS_CURRENCYAMOUNT-AMT_DOCCUR   = IS_ACCPOST-WRBTR.   &quot; Amount in Document Currency
+*   LS_CURRENCYAMOUNT-EXCH_RATE    =                     &quot; Exchange rate
+*   LS_CURRENCYAMOUNT-EXCH_RATE_V  =                     &quot; Indirect quoted exchange rate
+*   LS_CURRENCYAMOUNT-AMT_BASE     =                     &quot; Tax Base Amount in Document Currency
+*   LS_CURRENCYAMOUNT-DISC_BASE    =                     &quot; Amount eligible for cash discount in document currency
+*   LS_CURRENCYAMOUNT-DISC_AMT     =                     &quot; Cash discount amount in the currency of the currency types
+*   LS_CURRENCYAMOUNT-TAX_AMT      =                     &quot; Amount in Document Currency
+
+    APPEND LS_CURRENCYAMOUNT TO ME-&gt;T_CURRENCYAMOUNT.
+
+  ENDIF.
+
+  ADD 1 TO ME-&gt;N_ITEMNO_ACC.
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTPAYABLE" VERSION="1" LANGU="E" DESCRIPT="Fill BAPI table ACCOUNTPAYABLE" EXPOSURE="1" STATE="1" EDITORDER="4 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTPAYABLE" SCONAME="IS_ACCPOST" VERSION="1" LANGU="E" DESCRIPT="Main structure for ZCL_SIMPLE_ACC_POST" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ZFIS_SIMPLE_ACCPOST"/>
+   <source>METHOD FILL_ACCOUNTPAYABLE.
+  DATA: LS_ACCOUNTPAYABLE TYPE BAPIACAP09,
+        LS_CURRENCYAMOUNT TYPE BAPIACCR09.
+
+
+  CLEAR LS_ACCOUNTPAYABLE.
+
+  LS_ACCOUNTPAYABLE-ITEMNO_ACC      = ME-&gt;N_ITEMNO_ACC.    &quot; Accounting Document Line Item Number
+  LS_ACCOUNTPAYABLE-VENDOR_NO       = IS_ACCPOST-LIFNR.    &quot; Account Number of Vendor or Creditor
+* LS_ACCOUNTPAYABLE-GL_ACCOUNT      =                      &quot; General Ledger Account
+  LS_ACCOUNTPAYABLE-REF_KEY_1       = IS_ACCPOST-XREF1.    &quot; Business Partner Reference Key
+  LS_ACCOUNTPAYABLE-REF_KEY_2       = IS_ACCPOST-XREF2.    &quot; Business Partner Reference Key
+  LS_ACCOUNTPAYABLE-REF_KEY_3       = IS_ACCPOST-XREF3.    &quot; Reference Key for Line Item
+  LS_ACCOUNTPAYABLE-COMP_CODE       = IS_ACCPOST-BUKRS.    &quot; Company Code
+* LS_ACCOUNTPAYABLE-BUS_AREA        =                      &quot; Business Area
+  LS_ACCOUNTPAYABLE-PMNTTRMS        = IS_ACCPOST-ZTERM.    &quot; Terms of Payment Key
+  LS_ACCOUNTPAYABLE-BLINE_DATE      = IS_ACCPOST-ZFBDT.    &quot; Baseline Date For Due Date Calculation
+  LS_ACCOUNTPAYABLE-DSCT_DAYS1      = IS_ACCPOST-ZBD1T.    &quot; Days for first cash discount
+* LS_ACCOUNTPAYABLE-DSCT_DAYS2      =                      &quot; Days for second cash discount
+* LS_ACCOUNTPAYABLE-NETTERMS        =                      &quot; Deadline for net conditions
+* LS_ACCOUNTPAYABLE-DSCT_PCT1       =                      &quot; Percentage for First Cash Discount
+* LS_ACCOUNTPAYABLE-DSCT_PCT2       =                      &quot; Percentage for Second Cash Discount
+  LS_ACCOUNTPAYABLE-PYMT_METH       = IS_ACCPOST-ZLSCH.    &quot; Payment method
+* LS_ACCOUNTPAYABLE-PMTMTHSUPL      =                      &quot; Payment Method Supplement
+  LS_ACCOUNTPAYABLE-PMNT_BLOCK      = IS_ACCPOST-ZLSPR.    &quot; Payment block key
+* LS_ACCOUNTPAYABLE-SCBANK_IND      =                      &quot; State Central Bank Indicator
+* LS_ACCOUNTPAYABLE-SUPCOUNTRY      =                      &quot; Supplying Country
+* LS_ACCOUNTPAYABLE-SUPCOUNTRY_ISO  =                      &quot; Supplier country ISO code
+* LS_ACCOUNTPAYABLE-BLLSRV_IND      =                      &quot; Service Indicator (Foreign Payment)
+  LS_ACCOUNTPAYABLE-ALLOC_NMBR      = IS_ACCPOST-ZUONR.    &quot; Assignment Number
+  LS_ACCOUNTPAYABLE-ITEM_TEXT       = IS_ACCPOST-SGTXT.    &quot; Item Text
+* LS_ACCOUNTPAYABLE-PO_SUB_NO       =                      &quot; ISR Subscriber Number
+* LS_ACCOUNTPAYABLE-PO_CHECKDG      =                      &quot; ISR Check Digit
+* LS_ACCOUNTPAYABLE-PO_REF_NO       =                      &quot; ISR Reference Number
+* LS_ACCOUNTPAYABLE-W_TAX_CODE      =                      &quot; Withholding tax code
+* LS_ACCOUNTPAYABLE-BUSINESSPLACE   =                      &quot; Stores
+* LS_ACCOUNTPAYABLE-SECTIONCODE     =                      &quot; Section Code
+* LS_ACCOUNTPAYABLE-INSTR1          =                      &quot; Instruction Key 1
+* LS_ACCOUNTPAYABLE-INSTR2          =                      &quot; Instruction Key 2
+* LS_ACCOUNTPAYABLE-INSTR3          =                      &quot; Instruction Key 3
+* LS_ACCOUNTPAYABLE-INSTR4          =                      &quot; Instruction Key 4
+* LS_ACCOUNTPAYABLE-BRANCH          =                      &quot; Account number of the branch
+* LS_ACCOUNTPAYABLE-PYMT_CUR        =                      &quot; Currency for automatic payment
+* LS_ACCOUNTPAYABLE-PYMT_AMT        =                      &quot; Amount in Payment Currency
+* LS_ACCOUNTPAYABLE-PYMT_CUR_ISO    =                      &quot; ISO code currency
+  LS_ACCOUNTPAYABLE-SP_GL_IND       = IS_ACCPOST-UMSKS.    &quot; Special G/L Indicator
+* LS_ACCOUNTPAYABLE-TAX_CODE        =                      &quot; Tax on sales/purchases code
+* LS_ACCOUNTPAYABLE-TAX_DATE        =                      &quot; Date Relevant for Determining the Tax Rate
+* LS_ACCOUNTPAYABLE-TAXJURCODE      =                      &quot; Tax Jurisdiction
+* LS_ACCOUNTPAYABLE-ALT_PAYEE       =                      &quot; Alternative payee
+* LS_ACCOUNTPAYABLE-ALT_PAYEE_BANK  =                      &quot; Bank type of alternative payer
+* LS_ACCOUNTPAYABLE-PARTNER_BK      =                      &quot; Partner Bank Type
+  LS_ACCOUNTPAYABLE-BANK_ID         = IS_ACCPOST-HBKID.    &quot; Short Key for a House Bank
+* LS_ACCOUNTPAYABLE-PARTNER_GUID    =                      &quot; Com. Interface: Business Partner GUID
+* LS_ACCOUNTPAYABLE-PROFIT_CTR      =                      &quot; Profit Center
+* LS_ACCOUNTPAYABLE-FUND            =                      &quot; Fund
+* LS_ACCOUNTPAYABLE-GRANT_NBR       =                      &quot; Grant
+* LS_ACCOUNTPAYABLE-MEASURE         =                      &quot; Funded Program
+  LS_ACCOUNTPAYABLE-HOUSEBANKACCTID = IS_ACCPOST-HKTID.    &quot; ID for Account Details
+* LS_ACCOUNTPAYABLE-BUDGET_PERIOD   =                      &quot; FM: Budget Period
+* LS_ACCOUNTPAYABLE-PPA_EX_IND      =                      &quot; PPA Exclude Indicator
+
+  APPEND LS_ACCOUNTPAYABLE TO ME-&gt;T_ACCOUNTPAYABLE.
+
+  if IS_ACCPOST-WITHT is NOT INITIAL.
+    me-&gt;FILL_ACCOUNTWT( IS_ACCPOST = IS_ACCPOST ).
+  ENDIF.
+
+  IF IS_ACCPOST-MWSKZ IS NOT INITIAL.
+    ME-&gt;FILL_ACCOUNTTAX( IS_ACCPOST = IS_ACCPOST ).
+  ELSE.
+
+    &quot; (BAPIACCR09) Currency Items
+    CLEAR LS_CURRENCYAMOUNT.
+
+    LS_CURRENCYAMOUNT-ITEMNO_ACC   = ME-&gt;N_ITEMNO_ACC.   &quot; Accounting Document Line Item Number
+    LS_CURRENCYAMOUNT-CURR_TYPE    = &apos;00&apos;.               &quot; Currency Type and Valuation View
+    LS_CURRENCYAMOUNT-CURRENCY     = IS_ACCPOST-WAERS.   &quot; Currency Key
+*   LS_CURRENCYAMOUNT-CURRENCY_ISO =                     &quot; ISO code currency
+    LS_CURRENCYAMOUNT-AMT_DOCCUR   = IS_ACCPOST-WRBTR.   &quot; Amount in Document Currency
+*   LS_CURRENCYAMOUNT-EXCH_RATE    =                     &quot; Exchange rate
+*   LS_CURRENCYAMOUNT-EXCH_RATE_V  =                     &quot; Indirect quoted exchange rate
+*   LS_CURRENCYAMOUNT-AMT_BASE     =                     &quot; Tax Base Amount in Document Currency
+*   LS_CURRENCYAMOUNT-DISC_BASE    =                     &quot; Amount eligible for cash discount in document currency
+*   LS_CURRENCYAMOUNT-DISC_AMT     =                     &quot; Cash discount amount in the currency of the currency types
+*   LS_CURRENCYAMOUNT-TAX_AMT      =                     &quot; Amount in Document Currency
+
+    APPEND LS_CURRENCYAMOUNT TO ME-&gt;T_CURRENCYAMOUNT.
+
+  ENDIF.
+
+  ADD 1 TO ME-&gt;N_ITEMNO_ACC.
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTRECEIVABLE" VERSION="1" LANGU="E" DESCRIPT="Fill BAPI table ACCOUNTRECEIVABLE" EXPOSURE="1" STATE="1" EDITORDER="5 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTRECEIVABLE" SCONAME="IS_ACCPOST" VERSION="1" LANGU="E" DESCRIPT="Main structure for ZCL_SIMPLE_ACC_POST" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ZFIS_SIMPLE_ACCPOST"/>
+   <source>METHOD FILL_ACCOUNTRECEIVABLE.
+  DATA: LS_ACCOUNTRECEIVABLE TYPE BAPIACAR09,
+        LS_CURRENCYAMOUNT TYPE BAPIACCR09.
+
+
+  CLEAR LS_ACCOUNTRECEIVABLE.
+
+  LS_ACCOUNTRECEIVABLE-ITEMNO_ACC      = ME-&gt;N_ITEMNO_ACC.      &quot; Accounting Document Line Item Number
+  LS_ACCOUNTRECEIVABLE-CUSTOMER        = IS_ACCPOST-KUNNR.      &quot; Customer Number
+* LS_ACCOUNTRECEIVABLE-GL_ACCOUNT      =                        &quot; General Ledger Account
+  LS_ACCOUNTRECEIVABLE-REF_KEY_1       = IS_ACCPOST-XREF1.      &quot; Business Partner Reference Key
+  LS_ACCOUNTRECEIVABLE-REF_KEY_2       = IS_ACCPOST-XREF2.      &quot; Business Partner Reference Key
+  LS_ACCOUNTRECEIVABLE-REF_KEY_3       = IS_ACCPOST-XREF3.      &quot; Reference Key for Line Item
+* LS_ACCOUNTRECEIVABLE-COMP_CODE       =                        &quot; Company Code
+* LS_ACCOUNTRECEIVABLE-BUS_AREA        =                        &quot; Business Area
+  LS_ACCOUNTRECEIVABLE-PMNTTRMS        = IS_ACCPOST-ZTERM.      &quot; Terms of Payment Key
+  LS_ACCOUNTRECEIVABLE-BLINE_DATE      = IS_ACCPOST-ZFBDT.      &quot; Baseline Date For Due Date Calculation
+  LS_ACCOUNTRECEIVABLE-DSCT_DAYS1      = IS_ACCPOST-ZBD1T.      &quot; Days for first cash discount
+* LS_ACCOUNTRECEIVABLE-DSCT_DAYS2      =                        &quot; Days for second cash discount
+* LS_ACCOUNTRECEIVABLE-NETTERMS        =                        &quot; Deadline for net conditions
+* LS_ACCOUNTRECEIVABLE-DSCT_PCT1       =                        &quot; Percentage for First Cash Discount
+* LS_ACCOUNTRECEIVABLE-DSCT_PCT2       =                        &quot; Percentage for Second Cash Discount
+  LS_ACCOUNTRECEIVABLE-PYMT_METH       = IS_ACCPOST-ZLSCH.      &quot; Payment method
+* LS_ACCOUNTRECEIVABLE-PMTMTHSUPL      =                        &quot; Payment Method Supplement
+* LS_ACCOUNTRECEIVABLE-PAYMT_REF       =                        &quot; Payment Reference
+* LS_ACCOUNTRECEIVABLE-DUNN_KEY        =                        &quot; Dunning keys
+* LS_ACCOUNTRECEIVABLE-DUNN_BLOCK      =                        &quot; Dunning block
+  LS_ACCOUNTRECEIVABLE-PMNT_BLOCK      = IS_ACCPOST-ZLSPR.      &quot; Payment block key
+* LS_ACCOUNTRECEIVABLE-VAT_REG_NO      =                        &quot; VAT Registration Number
+  LS_ACCOUNTRECEIVABLE-ALLOC_NMBR      = IS_ACCPOST-ZUONR.      &quot; Assignment Number
+  LS_ACCOUNTRECEIVABLE-ITEM_TEXT       = IS_ACCPOST-SGTXT.      &quot; Item Text
+* LS_ACCOUNTRECEIVABLE-PARTNER_BK      =                        &quot; Partner Bank Type
+* LS_ACCOUNTRECEIVABLE-SCBANK_IND      =                        &quot; State Central Bank Indicator
+* LS_ACCOUNTRECEIVABLE-BUSINESSPLACE   =                        &quot; Stores
+* LS_ACCOUNTRECEIVABLE-SECTIONCODE     =                        &quot; Section Code
+* LS_ACCOUNTRECEIVABLE-BRANCH          =                        &quot; Account number of the branch
+* LS_ACCOUNTRECEIVABLE-PYMT_CUR        =                        &quot; Currency for automatic payment
+* LS_ACCOUNTRECEIVABLE-PYMT_CUR_ISO    =                        &quot; ISO code currency
+* LS_ACCOUNTRECEIVABLE-PYMT_AMT        =                        &quot; Amount in Payment Currency
+* LS_ACCOUNTRECEIVABLE-C_CTR_AREA      =                        &quot; Credit control area
+  LS_ACCOUNTRECEIVABLE-BANK_ID         = IS_ACCPOST-HBKID.      &quot; Short Key for a House Bank
+* LS_ACCOUNTRECEIVABLE-SUPCOUNTRY      =                        &quot; Supplying Country
+* LS_ACCOUNTRECEIVABLE-SUPCOUNTRY_ISO  =                        &quot; Supplier country ISO code
+* LS_ACCOUNTRECEIVABLE-TAX_CODE        =                        &quot; Tax on sales/purchases code
+* LS_ACCOUNTRECEIVABLE-TAXJURCODE      =                        &quot; Tax Jurisdiction
+* LS_ACCOUNTRECEIVABLE-TAX_DATE        =                        &quot; Date Relevant for Determining the Tax Rate
+  LS_ACCOUNTRECEIVABLE-SP_GL_IND       = IS_ACCPOST-UMSKS.      &quot; Special G/L Indicator
+* LS_ACCOUNTRECEIVABLE-PARTNER_GUID    =                        &quot; Com. Interface: Business Partner GUID
+* LS_ACCOUNTRECEIVABLE-ALT_PAYEE       =                        &quot; Alternative payee
+* LS_ACCOUNTRECEIVABLE-ALT_PAYEE_BANK  =                        &quot; Bank type of alternative payer
+* LS_ACCOUNTRECEIVABLE-DUNN_AREA       =                        &quot; Dunning Area
+* LS_ACCOUNTRECEIVABLE-CASE_GUID       =                        &quot; Technical Case Key (Case GUID)
+* LS_ACCOUNTRECEIVABLE-PROFIT_CTR      =                        &quot; Profit Center
+* LS_ACCOUNTRECEIVABLE-FUND            =                        &quot; Fund
+* LS_ACCOUNTRECEIVABLE-GRANT_NBR       =                        &quot; Grant
+* LS_ACCOUNTRECEIVABLE-MEASURE         =                        &quot; Funded Program
+  LS_ACCOUNTRECEIVABLE-HOUSEBANKACCTID = IS_ACCPOST-HKTID.      &quot; ID for Account Details
+* LS_ACCOUNTRECEIVABLE-RES_DOC         =                        &quot; Document Number for Earmarked Funds
+* LS_ACCOUNTRECEIVABLE-RES_ITEM        =                        &quot; Earmarked Funds: Document Item
+* LS_ACCOUNTRECEIVABLE-FUND_LONG       =                        &quot; Long Fund (Obsolete)
+* LS_ACCOUNTRECEIVABLE-DISPUTE_IF_TYPE =                        &quot; Dispute Management: Dispute Interface Category
+* LS_ACCOUNTRECEIVABLE-BUDGET_PERIOD   =                        &quot; FM: Budget Period
+* LS_ACCOUNTRECEIVABLE-PAYS_PROV       =                        &quot; Payment Service Provider
+* LS_ACCOUNTRECEIVABLE-PAYS_TRAN       =                        &quot; Payment Reference of Payment Service Provider
+* LS_ACCOUNTRECEIVABLE-SEPA_MANDATE_ID =                        &quot; Unique Reference to Mandate for each Payee
+
+  APPEND LS_ACCOUNTRECEIVABLE TO ME-&gt;T_ACCOUNTRECEIVABLE.
+
+
+  &quot; Custormer CPD
+  IF IS_ACCPOST-NAME IS NOT INITIAL.
+    ME-&gt;FILL_CUSTOMERCPD( IS_ACCPOST = IS_ACCPOST ).
+  ENDIF.
+
+  IF IS_ACCPOST-WITHT IS NOT INITIAL.
+    ME-&gt;FILL_ACCOUNTWT( IS_ACCPOST = IS_ACCPOST ).
+  ENDIF.
+
+  &quot; Currency and tax items
+  IF IS_ACCPOST-MWSKZ IS NOT INITIAL.
+    ME-&gt;FILL_ACCOUNTTAX( IS_ACCPOST = IS_ACCPOST ).
+  ELSE.
+
+    &quot; (BAPIACCR09) Currency Items
+    CLEAR LS_CURRENCYAMOUNT.
+
+    LS_CURRENCYAMOUNT-ITEMNO_ACC   = ME-&gt;N_ITEMNO_ACC.   &quot; Accounting Document Line Item Number
+    LS_CURRENCYAMOUNT-CURR_TYPE    = &apos;00&apos;.               &quot; Currency Type and Valuation View
+    LS_CURRENCYAMOUNT-CURRENCY     = IS_ACCPOST-WAERS.   &quot; Currency Key
+*   LS_CURRENCYAMOUNT-CURRENCY_ISO =                     &quot; ISO code currency
+    LS_CURRENCYAMOUNT-AMT_DOCCUR   = IS_ACCPOST-WRBTR.   &quot; Amount in Document Currency
+*   LS_CURRENCYAMOUNT-EXCH_RATE    =                     &quot; Exchange rate
+*   LS_CURRENCYAMOUNT-EXCH_RATE_V  =                     &quot; Indirect quoted exchange rate
+*   LS_CURRENCYAMOUNT-AMT_BASE     =                     &quot; Tax Base Amount in Document Currency
+*   LS_CURRENCYAMOUNT-DISC_BASE    =                     &quot; Amount eligible for cash discount in document currency
+*   LS_CURRENCYAMOUNT-DISC_AMT     =                     &quot; Cash discount amount in the currency of the currency types
+*   LS_CURRENCYAMOUNT-TAX_AMT      =                     &quot; Amount in Document Currency
+
+    APPEND LS_CURRENCYAMOUNT TO ME-&gt;T_CURRENCYAMOUNT.
+
+  ENDIF.
+
+  ADD 1 TO ME-&gt;N_ITEMNO_ACC.
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTTAX" VERSION="1" LANGU="E" DESCRIPT="Fill BAPI table ACCOUNTTAX with tax of actual position" EXPOSURE="1" STATE="1" EDITORDER="7 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTTAX" SCONAME="IS_ACCPOST" VERSION="1" LANGU="E" DESCRIPT="Main structure for ZCL_SIMPLE_ACC_POST" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ZFIS_SIMPLE_ACCPOST"/>
+   <source>METHOD FILL_ACCOUNTTAX.
+
+  TYPES: TT_MWDAT TYPE TABLE OF RTAX1U15.
+  DATA: LT_MWDAT          TYPE TT_MWDAT,
+        LS_MWDAT          TYPE LINE OF TT_MWDAT,
+        LS_ACCOUNTTAX     TYPE BAPIACTX09,
+        LS_CURRENCYAMOUNT TYPE BAPIACCR09,
+        LV_WRBTR          TYPE BSEG-WRBTR.
+
+
+  &quot; Initialization
+  CLEAR LT_MWDAT.
+
+  &quot; Cast value to expected data type
+  LV_WRBTR = IS_ACCPOST-WRBTR.
+
+  &quot; Get net amount and tax amount
+  CALL FUNCTION &apos;CALCULATE_TAX_FROM_GROSSAMOUNT&apos;
+    EXPORTING
+      I_BUKRS                 = IS_ACCPOST-BUKRS
+      I_MWSKZ                 = IS_ACCPOST-MWSKZ
+      I_WAERS                 = IS_ACCPOST-WAERS
+      I_WRBTR                 = LV_WRBTR
+    TABLES
+      T_MWDAT                 = lT_MWDAT
+    EXCEPTIONS
+      BUKRS_NOT_FOUND         = 1
+      COUNTRY_NOT_FOUND       = 2
+      MWSKZ_NOT_DEFINED       = 3
+      MWSKZ_NOT_VALID         = 4
+      ACCOUNT_NOT_FOUND       = 5
+      DIFFERENT_DISCOUNT_BASE = 6
+      DIFFERENT_TAX_BASE      = 7
+      TXJCD_NOT_VALID         = 8
+      NOT_FOUND               = 9
+      KTOSL_NOT_FOUND         = 10
+      KALSM_NOT_FOUND         = 11
+      PARAMETER_ERROR         = 12
+      KNUMH_NOT_FOUND         = 13
+      KSCHL_NOT_FOUND         = 14
+      UNKNOWN_ERROR           = 15
+      OTHERS                  = 16.
+
+  IF SY-SUBRC &lt;&gt; 0.
+    RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+      EXPORTING
+        TEXTID   = ZCX_SIMPLE_ACC_POST=&gt;TAX_ERROR
+        ATTR1    = |{ SY-SUBRC }|
+        ATTR2    = |{ IS_ACCPOST-BUKRS }-{ IS_ACCPOST-MWSKZ }-{ IS_ACCPOST-WAERS }|
+        ATTR3    = |{ LV_WRBTR }|
+        ATTR4    = |{ ME-&gt;N_ACCPOST_TABIX }|.
+    .
+  ENDIF.
+
+  &quot; For each tax
+  LOOP AT lT_MWDAT INTO lS_MWDAT.
+
+    &quot; Condition base value
+    CLEAR LS_CURRENCYAMOUNT.
+
+    LS_CURRENCYAMOUNT-ITEMNO_ACC   = ME-&gt;N_ITEMNO_ACC.   &quot; Accounting Document Line Item Number
+    LS_CURRENCYAMOUNT-CURR_TYPE    = &apos;00&apos;.               &quot; Currency Type and Valuation View
+    LS_CURRENCYAMOUNT-CURRENCY     = IS_ACCPOST-WAERS.   &quot; Currency Key
+*   LS_CURRENCYAMOUNT-CURRENCY_ISO =                     &quot; ISO code currency
+    IF LS_MWDAT-HKONT &lt;&gt; &apos;&apos; and LS_MWDAT-WMWST = 0.
+      LS_CURRENCYAMOUNT-AMT_DOCCUR = LV_WRBTR.           &quot; Amount in Document Currency (Non-deductible Tax NAV/NVV)
+    ELSE.
+      LS_CURRENCYAMOUNT-AMT_DOCCUR = LS_MWDAT-KAWRT.     &quot; Amount in Document Currency
+    ENDIF.
+*   LS_CURRENCYAMOUNT-EXCH_RATE    =                     &quot; Exchange rate
+*   LS_CURRENCYAMOUNT-EXCH_RATE_V  =                     &quot; Indirect quoted exchange rate
+*   LS_CURRENCYAMOUNT-AMT_BASE     =                     &quot; Tax Base Amount in Document Currency
+*   LS_CURRENCYAMOUNT-DISC_BASE    =                     &quot; Amount eligible for cash discount in document currency
+*   LS_CURRENCYAMOUNT-DISC_AMT     =                     &quot; Cash discount amount in the currency of the currency types
+*   LS_CURRENCYAMOUNT-TAX_AMT      =                     &quot; Amount in Document Currency
+
+    APPEND LS_CURRENCYAMOUNT TO ME-&gt;T_CURRENCYAMOUNT.
+    ADD 1 TO ME-&gt;N_ITEMNO_ACC.
+
+
+    &quot; New position with calculated tax
+    CLEAR LS_ACCOUNTTAX.
+
+    LS_ACCOUNTTAX-ITEMNO_ACC        = ME-&gt;N_ITEMNO_ACC. &quot; Accounting Document Line Item Number
+    LS_ACCOUNTTAX-GL_ACCOUNT        = LS_MWDAT-HKONT.   &quot; General Ledger Account
+    LS_ACCOUNTTAX-COND_KEY          = LS_MWDAT-KSCHL.   &quot; Condition Type
+    LS_ACCOUNTTAX-ACCT_KEY          = LS_MWDAT-KTOSL.   &quot; Transaction Key
+    LS_ACCOUNTTAX-TAX_CODE          = IS_ACCPOST-MWSKZ. &quot; Tax on sales/purchases code
+    LS_ACCOUNTTAX-TAX_RATE          = LS_MWDAT-MSATZ.   &quot; Tax rate
+*    LS_ACCOUNTTAX-TAX_DATE         =                   &quot; Date Relevant for Determining the Tax Rate
+*    LS_ACCOUNTTAX-TAXJURCODE       =                   &quot; Tax Jurisdiction
+*    LS_ACCOUNTTAX-TAXJURCODE_DEEP  =                   &quot; Tax jurisdiction code - jurisdiction for lowest level tax
+*    LS_ACCOUNTTAX-TAXJURCODE_LEVEL =                   &quot; Tax Jurisdiction Code Level
+*    LS_ACCOUNTTAX-ITEMNO_TAX       =                   &quot; Document item number refering to tax document.
+*    LS_ACCOUNTTAX-DIRECT_TAX       =                   &quot; Indicator: Direct Tax Posting
+
+    APPEND LS_ACCOUNTTAX TO ME-&gt;T_ACCOUNTTAX.
+
+
+    &quot; Tax Amount in Document Currency
+    CLEAR LS_CURRENCYAMOUNT.
+
+    LS_CURRENCYAMOUNT-ITEMNO_ACC   = ME-&gt;N_ITEMNO_ACC.    &quot; Accounting Document Line Item Number
+    LS_CURRENCYAMOUNT-CURR_TYPE    = &apos;00&apos;.                &quot; Currency Type and Valuation View
+    LS_CURRENCYAMOUNT-CURRENCY     = IS_ACCPOST-WAERS.    &quot; Currency Key
+*   LS_CURRENCYAMOUNT-CURRENCY_ISO =                      &quot; ISO code currency
+    LS_CURRENCYAMOUNT-AMT_DOCCUR   = LS_MWDAT-WMWST.      &quot; Amount in Document Currency
+*   LS_CURRENCYAMOUNT-EXCH_RATE    =                      &quot; Exchange rate
+*   LS_CURRENCYAMOUNT-EXCH_RATE_V  =                      &quot; Indirect quoted exchange rate
+    LS_CURRENCYAMOUNT-AMT_BASE     = LS_MWDAT-KAWRT.      &quot; Tax Base Amount in Document Currency
+*   LS_CURRENCYAMOUNT-DISC_BASE    =                      &quot; Amount eligible for cash discount in document currency
+*   LS_CURRENCYAMOUNT-DISC_AMT     =                      &quot; Cash discount amount in the currency of the currency types
+*   LS_CURRENCYAMOUNT-TAX_AMT      =                      &quot; Amount in Document Currency
+
+    APPEND LS_CURRENCYAMOUNT TO ME-&gt;T_CURRENCYAMOUNT.
+    ADD 1 TO ME-&gt;N_ITEMNO_ACC.
+
+  ENDLOOP.
+
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTWT" VERSION="1" LANGU="E" DESCRIPT="Fill BAPI table ACCOUNTWT with withholding data" EXPOSURE="1" STATE="1" EDITORDER="6 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_ACCOUNTWT" SCONAME="IS_ACCPOST" VERSION="1" LANGU="E" DESCRIPT="Main structure for ZCL_SIMPLE_ACC_POST" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ZFIS_SIMPLE_ACCPOST"/>
+   <source>METHOD FILL_ACCOUNTWT.
+  DATA: LS_ACCOUNTWT TYPE BAPIACWT09.
+
+  CLEAR LS_ACCOUNTWT.
+
+  LS_ACCOUNTWT-ITEMNO_ACC  = ME-&gt;N_ITEMNO_ACC.        &quot; Accounting Document Line Item Number
+  LS_ACCOUNTWT-WT_TYPE     = IS_ACCPOST-WITHT.        &quot; Indicator for withholding tax type
+  LS_ACCOUNTWT-WT_CODE     = IS_ACCPOST-WT_WITHCD.    &quot; Withholding tax code
+* LS_ACCOUNTWT-BAS_AMT_LC  =                          &quot; Withholding Tax Base Amount (Local Currency)
+  LS_ACCOUNTWT-BAS_AMT_TC  = IS_ACCPOST-WT_QSSHB.     &quot; Withholding tax base amount in document currency
+* LS_ACCOUNTWT-BAS_AMT_L2  =                          &quot; Withholding tax base amount in 2nd local currency
+* LS_ACCOUNTWT-BAS_AMT_L3  =                          &quot; Withholding tax base amount in 3rd local currency
+* LS_ACCOUNTWT-MAN_AMT_LC  =                          &quot; Enter withholding tax amount in local currency manually
+  LS_ACCOUNTWT-MAN_AMT_TC  = IS_ACCPOST-WT_QBSHB.     &quot; Enter withholding tax amount in document currency manually
+* LS_ACCOUNTWT-MAN_AMT_L2  =                          &quot; Manually entered with/tax amount in 2nd local currency
+* LS_ACCOUNTWT-MAN_AMT_L3  =                          &quot; With/tax amount in 3rd local currency entered manually
+* LS_ACCOUNTWT-AWH_AMT_LC  =                          &quot; Withholding tax amount (in local currency) already withheld
+* LS_ACCOUNTWT-AWH_AMT_TC  =                          &quot; Withholding tax amount already withheld in document currency
+* LS_ACCOUNTWT-AWH_AMT_L2  =                          &quot; Withholding tax amount already withheld in 2nd local curr.
+* LS_ACCOUNTWT-AWH_AMT_L3  =                          &quot; With/tax amount already withheld in 3rd local currency
+* LS_ACCOUNTWT-BAS_AMT_IND =                          &quot; Indicator: Withholding tax base amount entered manually
+* LS_ACCOUNTWT-MAN_AMT_IND =                          &quot; Indicator: Withholding tax amount entered manually
+
+  APPEND LS_ACCOUNTWT TO ME-&gt;T_ACCOUNTWT.
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_BAPI" VERSION="1" LANGU="E" DESCRIPT="Fill tables and structures of BAPI_ACC_DOCUMENT_POST" EXPOSURE="1" STATE="1" EDITORDER="9 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_BAPI" SCONAME="CS_ACCPOST_DOC" VERSION="1" LANGU="E" DESCRIPT="Header information document" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="2" PARPASSTYP="1" TYPTYPE="1" TYPE="TY_ACCPOST_DOC"/>
+   <source>METHOD FILL_BAPI.
+  DATA: LR_CX_ROOT TYPE REF TO CX_ROOT,
+        LR_ZCX_SIMPLE_ACC_POST TYPE REF TO ZCX_SIMPLE_ACC_POST,
+        LS_ACCPOST TYPE ZFIS_SIMPLE_ACCPOST.
+
+
+  &quot; Add LOG to message collector
+  ME-&gt;R_MSG_LOG-&gt;ADD(
+    EXPORTING
+      ID_MSGTY = &apos;S&apos; ID_MSGID = &apos;ZFSAP&apos; ID_MSGNO = &apos;000&apos;
+      ID_MSGV1 = &apos;Accounting document ID: &apos;
+      ID_MSGV2 = |{ CS_ACCPOST_DOC-ID_ACCDOC }|
+  ).
+
+
+  &quot; Initialize data
+  CLEAR: S_DOCUMENTHEADER, S_CUSTOMERCPD, T_ACCOUNTGL, T_ACCOUNTPAYABLE, T_ACCOUNTRECEIVABLE,
+         T_ACCOUNTTAX, T_ACCOUNTWT, T_CONTRACTITEM, T_CRITERIA, T_CURRENCYAMOUNT, T_EXTENSION1, T_EXTENSION2,
+         T_PAYMENTCARD, T_REALESTATE, T_RETURN, T_VALUEFIELD.
+
+
+  &quot; Fill BAPI data
+  TRY.
+
+      &quot; Document Header
+      ME-&gt;FILL_DOCUMENTHEADER(
+        CHANGING
+          CS_ACCPOST_DOC = CS_ACCPOST_DOC    &quot; Header information
+      ).
+
+
+      &quot; Items
+      ME-&gt;N_ITEMNO_ACC = 1.
+      LOOP AT ME-&gt;T_ACCPOST INTO LS_ACCPOST WHERE ID_ACCDOC = CS_ACCPOST_DOC-ID_ACCDOC.
+
+        &quot; G/L items
+        IF LS_ACCPOST-HKONT IS NOT INITIAL.
+          ME-&gt;FILL_ACCOUNTGL( IS_ACCPOST = LS_ACCPOST ).
+        ENDIF.
+
+        &quot; Vendor items
+        IF LS_ACCPOST-LIFNR IS NOT INITIAL.
+          ME-&gt;FILL_ACCOUNTPAYABLE( IS_ACCPOST = LS_ACCPOST ).
+        ENDIF.
+
+        &quot; Debtor items (Customer CPD as well)
+        IF LS_ACCPOST-KUNNR IS NOT INITIAL.
+          ME-&gt;FILL_ACCOUNTRECEIVABLE( IS_ACCPOST = LS_ACCPOST ).
+        ENDIF.
+
+      ENDLOOP.
+
+      &quot; Extension
+*     CLEAR ME-&gt;T_EXTENSION1.
+*     DATA: LS_extension1 TYPE BAPIACEXTC.
+*     LS_EXTENSION1-FIELD1 = &apos;BAPI CALL&apos;.
+*     APPEND LS_EXTENSION1 TO ME-&gt;T_EXTENSION1.
+
+
+    CATCH ZCX_SIMPLE_ACC_POST INTO LR_ZCX_SIMPLE_ACC_POST.
+
+      &quot; Add exception to message collector
+      ME-&gt;R_MSG_LOG-&gt;ADD_FROM_EXCEPTION(
+        EXPORTING
+          IO_EXCEPTION = LR_ZCX_SIMPLE_ACC_POST
+          ID_TABNAME   = &apos;CS_ACCPOST_DOC&apos;
+          ID_FIELDNAME = &apos;ID_ACCDOC&apos;
+          ID_VALUE     = |{ CS_ACCPOST_DOC-ID_ACCDOC }|
+      ).
+
+      &quot; Add exception to auxiliary messages table
+      DATA: LS_BAPIRET2 TYPE BAPIRET2.
+      LR_ZCX_SIMPLE_ACC_POST-&gt;GET_BAPIRET2(
+        EXPORTING
+          IV_MSGTY = &apos;E&apos;
+        IMPORTING
+          ES_BAPIRET2 = LS_BAPIRET2
+      ).
+      INSERT LS_BAPIRET2 INTO TABLE ME-&gt;T_ACCPOST_MSG.
+
+      &quot; Update document status
+      CS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_ERROR.
+
+  ENDTRY.
+
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_CUSTOMERCPD" VERSION="1" LANGU="E" DESCRIPT="Fill BAPI structure CUSTOMERCPD" EXPOSURE="1" STATE="1" EDITORDER="1 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_CUSTOMERCPD" SCONAME="IS_ACCPOST" VERSION="1" LANGU="E" DESCRIPT="Main structure for ZCL_SIMPLE_ACC_POST" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ZFIS_SIMPLE_ACCPOST"/>
+   <source>method FILL_CUSTOMERCPD.
+  DATA LS_CUSTOMERCPD TYPE BAPIACPA09.
+
+  CLEAR LS_CUSTOMERCPD.
+
+  LS_CUSTOMERCPD-NAME          = IS_ACCPOST-NAME.         &quot; Name 1
+* LS_CUSTOMERCPD-NAME_2        =                          &quot; Name 2
+* LS_CUSTOMERCPD-NAME_3        =                          &quot; Name 3
+* LS_CUSTOMERCPD-NAME_4        =                          &quot; Name 4
+  LS_CUSTOMERCPD-POSTL_CODE    = IS_ACCPOST-POSTL_CODE.   &quot; Postal Code
+  LS_CUSTOMERCPD-CITY          = IS_ACCPOST-CITY.         &quot; City
+* LS_CUSTOMERCPD-COUNTRY       =                          &quot; Country Key
+  LS_CUSTOMERCPD-COUNTRY_ISO   = IS_ACCPOST-COUNTRY_ISO.  &quot; Country key in ISO code
+  LS_CUSTOMERCPD-STREET        = IS_ACCPOST-STREET.       &quot; House number and street
+* LS_CUSTOMERCPD-PO_BOX        =                          &quot; PO Box
+* LS_CUSTOMERCPD-POBX_PCD      =                          &quot; P.O. Box Postal Code
+* LS_CUSTOMERCPD-POBK_CURAC    =                          &quot; Account Number of Bank Account At Post Office
+* LS_CUSTOMERCPD-BANK_ACCT     =                          &quot; Bank account number
+* LS_CUSTOMERCPD-BANK_NO       =                          &quot; Bank number
+* LS_CUSTOMERCPD-BANK_CTRY     =                          &quot; Bank country key
+* LS_CUSTOMERCPD-BANK_CTRY_ISO =                          &quot; Bank country key in ISO code
+  LS_CUSTOMERCPD-TAX_NO_1      = IS_ACCPOST-TAX_NO_1.     &quot; Tax Number 1
+  LS_CUSTOMERCPD-TAX_NO_2      = IS_ACCPOST-TAX_NO_2.     &quot; Tax Number 2
+* LS_CUSTOMERCPD-TAX           =                          &quot; Liable for VAT
+* LS_CUSTOMERCPD-EQUAL_TAX     =                          &quot; Indicator: Business partner subject to equalization tax ?
+* LS_CUSTOMERCPD-REGION        =                          &quot; Region (State, Province, County)
+* LS_CUSTOMERCPD-CTRL_KEY      =                          &quot; Bank Control Key
+* LS_CUSTOMERCPD-INSTR_KEY     =                          &quot; Instruction key for data medium exchange
+* LS_CUSTOMERCPD-DME_IND       =                          &quot; Indicator for Data Medium Exchange
+* LS_CUSTOMERCPD-LANGU_ISO     =                          &quot; 2-Character SAP Language Code
+* LS_CUSTOMERCPD-IBAN          =                          &quot; IBAN (International Bank Account Number)
+* LS_CUSTOMERCPD-SWIFT_CODE    =                          &quot; SWIFT/BIC for International Payments
+  LS_CUSTOMERCPD-TAX_NO_3      = IS_ACCPOST-TAX_NO_3.     &quot; Tax Number 3
+  LS_CUSTOMERCPD-TAX_NO_4      = IS_ACCPOST-TAX_NO_4.     &quot; Tax Number 4
+
+  ME-&gt;S_CUSTOMERCPD = LS_CUSTOMERCPD.
+
+endmethod.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_DOCUMENTHEADER" VERSION="1" LANGU="E" DESCRIPT="Fill BAPI importing structure DOCUMENTHEADER" EXPOSURE="1" STATE="1" EDITORDER="8 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_DOCUMENTHEADER" SCONAME="CS_ACCPOST_DOC" VERSION="1" LANGU="E" DESCRIPT="Header information" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="2" PARPASSTYP="1" TYPTYPE="1" TYPE="TY_ACCPOST_DOC"/>
+   <source>METHOD FILL_DOCUMENTHEADER.
+  DATA: LS_ACCPOST TYPE LINE OF ME-&gt;TT_ACCPOST.
+
+  &quot; Read data from one item of this group
+  READ TABLE ME-&gt;T_ACCPOST INTO LS_ACCPOST WITH KEY ID_ACCDOC = CS_ACCPOST_DOC-ID_ACCDOC.
+
+  &quot; Fill header data
+  CLEAR ME-&gt;S_DOCUMENTHEADER.
+
+* ME-&gt;S_DOCUMENTHEADER-OBJ_TYPE         =                       &quot; Reference Transaction
+* ME-&gt;S_DOCUMENTHEADER-OBJ_KEY          =                       &quot; Reference Key
+* ME-&gt;S_DOCUMENTHEADER-OBJ_SYS          =                       &quot; Logical system of source document
+* ME-&gt;S_DOCUMENTHEADER-BUS_ACT          =                       &quot; Business Transaction
+  ME-&gt;S_DOCUMENTHEADER-USERNAME         = SY-UNAME.             &quot; User name
+  ME-&gt;S_DOCUMENTHEADER-HEADER_TXT       = LS_ACCPOST-BKTXT.     &quot; Document Header Text
+  ME-&gt;S_DOCUMENTHEADER-COMP_CODE        = LS_ACCPOST-BUKRS.     &quot; Company Code
+  ME-&gt;S_DOCUMENTHEADER-DOC_DATE         = LS_ACCPOST-BLDAT.     &quot; Document Date in Document
+  ME-&gt;S_DOCUMENTHEADER-PSTNG_DATE       = LS_ACCPOST-BUDAT.     &quot; Posting Date in the Document
+* ME-&gt;S_DOCUMENTHEADER-TRANS_DATE       =                       &quot; Translation Date
+* ME-&gt;S_DOCUMENTHEADER-FISC_YEAR        =                       &quot; Fiscal Year
+  ME-&gt;S_DOCUMENTHEADER-FIS_PERIOD       = LS_ACCPOST-MONAT.     &quot; Fiscal Period
+  ME-&gt;S_DOCUMENTHEADER-DOC_TYPE         = LS_ACCPOST-BLART.     &quot; Document Type
+  ME-&gt;S_DOCUMENTHEADER-REF_DOC_NO       = LS_ACCPOST-XBLNR.     &quot; Reference Document Number
+* ME-&gt;S_DOCUMENTHEADER-AC_DOC_NO        =                       &quot; Accounting Document Number
+* ME-&gt;S_DOCUMENTHEADER-OBJ_KEY_R        =                       &quot; Cancel: object key (AWREF_REV and AWORG_REV)
+* ME-&gt;S_DOCUMENTHEADER-REASON_REV       =                       &quot; Reason for reversal
+* ME-&gt;S_DOCUMENTHEADER-COMPO_ACC        =                       &quot; Component in ACC Interface
+* ME-&gt;S_DOCUMENTHEADER-REF_DOC_NO_LONG  =                       &quot; Reference Document Number (for Dependencies see Long Text)
+* ME-&gt;S_DOCUMENTHEADER-ACC_PRINCIPLE    =                       &quot; Accounting Principle
+* ME-&gt;S_DOCUMENTHEADER-NEG_POSTNG       =                       &quot; Indicator: Negative posting
+* ME-&gt;S_DOCUMENTHEADER-OBJ_KEY_INV      =                       &quot; Invoice Ref.: Object Key (AWREF_REB and AWORG_REB)
+* ME-&gt;S_DOCUMENTHEADER-BILL_CATEGORY    =                       &quot; Billing category
+  ME-&gt;S_DOCUMENTHEADER-VATDATE          = LS_ACCPOST-VATDATE.   &quot; Tax Reporting Date
+* ME-&gt;S_DOCUMENTHEADER-INVOICE_REC_DATE =                       &quot; Invoice Receipt Date
+* ME-&gt;S_DOCUMENTHEADER-ECS_ENV          =                       &quot; ECS Environment
+* ME-&gt;S_DOCUMENTHEADER-PARTIAL_REV      =                       &quot; Indicator: Partial Reversal
+
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="FILL_T_ACCPOST_WITH_CLIPDATA" VERSION="1" LANGU="E" DESCRIPT="Fill table T_ACCPOST with parsed data from clipboard" EXPOSURE="1" STATE="1" EDITORDER="10 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <source>method FILL_T_ACCPOST_WITH_CLIPDATA.
+  DATA: LT_ACCPOST TYPE STANDARD TABLE OF ZFIS_SIMPLE_ACCPOST,
+        LR_DATA_PARSER_ERROR TYPE REF TO LCX_DATA_PARSER_ERROR,
+        LV_CLIPDATA TYPE STRING.
+
+  &quot; Read clipboard. First line must be field names of required data for posting (See structure ZFIS_SIMPLE_ACCPOST).
+  LV_CLIPDATA = ME-&gt;READ_CLIPBOARD( ).
+
+  &quot; Parse clipboard data to LT_ACCPOST
+  TRY .
+
+      LCL_DATA_PARSER=&gt;CREATE( LT_ACCPOST )-&gt;PARSE(
+         EXPORTING I_DATA      = LV_CLIPDATA
+                   I_STRICT    = ABAP_FALSE
+                   I_HAS_HEAD  = ABAP_TRUE
+         IMPORTING E_CONTAINER = LT_ACCPOST
+      ).
+
+    CATCH LCX_DATA_PARSER_ERROR INTO LR_DATA_PARSER_ERROR.
+      ME-&gt;R_MSG_LOG-&gt;ADD_FROM_EXCEPTION( EXPORTING IO_EXCEPTION = LR_DATA_PARSER_ERROR ).
+      RETURN.
+  ENDTRY.
+
+  &quot; Insert parsed data to main table
+  INSERT LINES OF LT_ACCPOST INTO TABLE ME-&gt;T_ACCPOST.
+
+
+endmethod.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="POST" VERSION="1" LANGU="E" DESCRIPT="Post or check items of IT_ACCPOST" EXPOSURE="2" STATE="1" EDITORDER="4 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="POST" SCONAME="IV_CHECK" VERSION="1" LANGU="E" DESCRIPT="Only check posting" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ABAP_BOOL" PARVALUE="ABAP_FALSE"/>
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="POST" SCONAME="IV_CLIPBOARD_DATA" VERSION="1" LANGU="E" DESCRIPT="Post clipboard data" CMPTYPE="1" MTDTYPE="0" EDITORDER="2 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="ABAP_BOOL" PARVALUE="ABAP_FALSE"/>
+   <source>METHOD POST.
+  DATA: LS_ACCPOST TYPE LINE OF ME-&gt;TT_ACCPOST,
+        LT_ACCPOST_AUX TYPE ME-&gt;TT_ACCPOST,
+        LS_ACCPOST_DOC TYPE LINE OF ME-&gt;TT_ACCPOST_DOC.
+
+
+  &quot; Populate data from clipboard into LT_ACCPOST
+  IF IV_CLIPBOARD_DATA = ABAP_TRUE.
+    CLEAR ME-&gt;T_ACCPOST.
+    ME-&gt;FILL_T_ACCPOST_WITH_CLIPDATA( ).
+  ENDIF.
+
+  &quot; Check number of items to post
+  IF LINES( ME-&gt;T_ACCPOST ) = 0.
+    ME-&gt;R_MSG_LOG-&gt;ADD(
+      EXPORTING
+        ID_MSGTY = &apos;E&apos; ID_MSGID = &apos;00&apos; ID_MSGNO = &apos;398&apos;
+        ID_MSGV1 = &apos;Nothing to post&apos;
+    ).
+    RETURN.
+  ENDIF.
+
+  &quot; Group all items without ID into &apos;Accounting_Document&apos;. Let ID_ACCDOS be a non-required field
+  CLEAR LS_ACCPOST.
+  LS_ACCPOST-ID_ACCDOC = &apos;Accounting_Document&apos;.
+  MODIFY ME-&gt;T_ACCPOST FROM LS_ACCPOST TRANSPORTING ID_ACCDOC WHERE ID_ACCDOC IS INITIAL.
+
+  &quot; Initialize returning tables and message collector
+  CLEAR ME-&gt;T_ACCPOST_DOC.
+  CLEAR ME-&gt;T_ACCPOST_MSG.
+  ME-&gt;R_MSG_LOG-&gt;CLEAR( ).
+
+  &quot; Select distint values of ID_ACCDOC into LT_ACCPOST_AUX
+  LT_ACCPOST_AUX[] = ME-&gt;T_ACCPOST[].
+  SORT LT_ACCPOST_AUX BY ID_ACCDOC.
+  DELETE ADJACENT DUPLICATES FROM LT_ACCPOST_AUX COMPARING ID_ACCDOC.
+
+  &quot; Call BAPI for each distinct ID_ACCDOC
+  LOOP AT LT_ACCPOST_AUX INTO LS_ACCPOST.
+
+    &quot; Internal ID of document
+    ME-&gt;N_ACCPOST_TABIX = SY-TABIX.
+
+    CLEAR LS_ACCPOST_DOC.
+
+    LS_ACCPOST_DOC-ID_ACCDOC = LS_ACCPOST-ID_ACCDOC.
+    LS_ACCPOST_DOC-LOG_NO = ME-&gt;N_ACCPOST_TABIX.
+    LS_ACCPOST_DOC-STATUS = ZCL_SIMPLE_ACC_POST=&gt;C_STATUS_NEW.
+
+    ME-&gt;FILL_BAPI( CHANGING CS_ACCPOST_DOC = LS_ACCPOST_DOC ).
+    ME-&gt;CALL_BAPI( EXPORTING IV_CHECK = IV_CHECK CHANGING CS_ACCPOST_DOC = LS_ACCPOST_DOC ).
+
+    APPEND LS_ACCPOST_DOC TO ME-&gt;T_ACCPOST_DOC.
+
+  ENDLOOP.
+
+  &quot; Store logs in database
+  ME-&gt;R_MSG_LOG-&gt;STORE(
+    EXCEPTIONS
+      ERROR             = 1
+      OTHERS            = 2
+  ).
+  IF SY-SUBRC &lt;&gt; 0.
+  ENDIF.
+
+
+
+ENDMETHOD.</source>
+  </method>
+  <method CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="READ_CLIPBOARD" VERSION="1" LANGU="E" DESCRIPT="Return string with clipboard&apos;s data separated by CR_LF" EXPOSURE="1" STATE="1" EDITORDER="11 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCL_SIMPLE_ACC_POST" CMPNAME="READ_CLIPBOARD" SCONAME="RV_CLIPDATA" VERSION="1" LANGU="E" DESCRIPT="Clipboard&apos;s data" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="3" PARPASSTYP="0" TYPTYPE="1" TYPE="STRING"/>
+   <source>METHOD READ_CLIPBOARD.
+
+  CONSTANTS:
+    C_TAB  LIKE CL_ABAP_CHAR_UTILITIES=&gt;HORIZONTAL_TAB VALUE CL_ABAP_CHAR_UTILITIES=&gt;HORIZONTAL_TAB,
+    C_CRLF LIKE CL_ABAP_CHAR_UTILITIES=&gt;CR_LF          VALUE CL_ABAP_CHAR_UTILITIES=&gt;CR_LF.
+  TYPES:
+    BEGIN OF TY_CLIPDATA,
+        DATA TYPE C LENGTH 500,
+       END OF TY_CLIPDATA.
+  DATA: LT_CLIPDATA TYPE STANDARD TABLE OF TY_CLIPDATA,
+        LW_CLIPDATA LIKE LINE OF LT_CLIPDATA,
+        LN_CLIP_LEN TYPE I.
+
+  &quot; Read clipboard
+  CL_GUI_FRONTEND_SERVICES=&gt;CLIPBOARD_IMPORT(
+    IMPORTING
+       DATA                 = LT_CLIPDATA
+       LENGTH               = LN_CLIP_LEN
+     EXCEPTIONS
+       CNTL_ERROR           = 1
+       ERROR_NO_GUI         = 2
+       NOT_SUPPORTED_BY_GUI = 3
+       OTHERS               = 4 ).
+
+  IF SY-SUBRC NE 0.
+    ME-&gt;R_MSG_LOG-&gt;ADD_SYMSG( ).
+    RETURN.
+  ENDIF.
+
+  &quot; Concatenate lines into RS_CLIPDATA separated by carriage return
+  LOOP AT LT_CLIPDATA INTO LW_CLIPDATA.
+    CONCATENATE RV_CLIPDATA LW_CLIPDATA C_CRLF INTO RV_CLIPDATA.
+  ENDLOOP.
+
+ENDMETHOD.</source>
+  </method>
+ </CLAS>
+ <CLAS CLSNAME="ZCX_SIMPLE_ACC_POST" VERSION="1" LANGU="E" DESCRIPT="ZCL_SIMPLE_ACC_POST Exception class" CATEGORY="40" EXPOSURE="2" STATE="1" RELEASE="0" CLSFINAL="X" CLSCCINCL="X" FIXPT="X" UNICODE="X" CLSBCCAT="00" DURATION_TYPE="0 " RISK_LEVEL="0 " ZSAPLINK_PLUGIN_MAJOR_VERSION="0 " ZSAPLINK_PLUGIN_MINOR_VERSION="1 " ZSAPLINK_PLUGIN_BUILD_VERSION="0 " ZSAPLINK_PLUGIN_INFO1="ZSAPLINK_CLASS is part of the main ZSAPLINK project --&gt; This plugin found there instead of ZSAPLINK_PLUGINS projects" ZSAPLINK_PLUGIN_INFO2="SAPLINK homepage: https://www.assembla.com/spaces/saplink/wiki" ZSAPLINK_PLUGIN_INFO3="Download from https://www.assembla.com/code/saplink/subversion/nodes" ZSAPLINK_PLUGIN_INFO4="and navigate to:  trunk -&gt; core -&gt; ZSAPLINK -&gt; CLAS -&gt; ZSAPLINK_CLASS.slnk" REFCLSNAME="CX_NO_CHECK">
+  <implementing CLSNAME="ZCX_SIMPLE_ACC_POST" REFCLSNAME="IF_T100_MESSAGE" VERSION="1" EXPOSURE="2" STATE="1" RELTYPE="1" EDITORDER="0 "/>
+  <localImplementation>*&quot;* use this source file for the definition and implementation of
+*&quot;* local helper classes, interface definitions and type
+*&quot;* declarations</localImplementation>
+  <localTypes>*&quot;* use this source file for any type of declarations (class
+*&quot;* definitions, interfaces or type declarations) you need for
+*&quot;* components in the private section</localTypes>
+  <localMacros>*&quot;* use this source file for any macro definitions you need
+*&quot;* in the implementation part of the class</localMacros>
+  <attribute CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="ATTR1" VERSION="1" LANGU="E" DESCRIPT="Value 1" EXPOSURE="2" STATE="1" EDITORDER="4 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="SCX_ATTRNAME" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="ATTR2" VERSION="1" LANGU="E" DESCRIPT="Value 2" EXPOSURE="2" STATE="1" EDITORDER="5 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="SCX_ATTRNAME" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="ATTR3" VERSION="1" LANGU="E" DESCRIPT="Value 3" EXPOSURE="2" STATE="1" EDITORDER="6 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="SCX_ATTRNAME" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="ATTR4" VERSION="1" LANGU="E" DESCRIPT="Value 4" EXPOSURE="2" STATE="1" EDITORDER="7 " ATTDECLTYP="0" ATTEXPVIRT="0" TYPTYPE="1" TYPE="SCX_ATTRNAME" SRCROW1="0 " SRCCOLUMN1="0 " SRCROW2="0 " SRCCOLUMN2="0 " TYPESRC_LENG="0 "/>
+  <attribute CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="ERROR" VERSION="1" LANGU="E" EXPOSURE="2" STATE="1" EDITORDER="1 " ATTDECLTYP="2" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="12 " SRCCOLUMN1="4 " SRCROW2="19 " SRCCOLUMN2="15 " LOCKED="X" TYPESRC_LENG="299 " TYPESRC="begin of ERROR,
+      msgid type symsgid value &apos;ZFSAP&apos;,
+      msgno type symsgno value &apos;000&apos;,
+      attr1 type scx_attrname value &apos;ATTR1&apos;,
+      attr2 type scx_attrname value &apos;ATTR2&apos;,
+      attr3 type scx_attrname value &apos;ATTR3&apos;,
+      attr4 type scx_attrname value &apos;ATTR4&apos;,
+    end of ERROR
+"/>
+  <attribute CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="INFO" VERSION="1" LANGU="E" EXPOSURE="2" STATE="1" EDITORDER="2 " ATTDECLTYP="2" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="21 " SRCCOLUMN1="4 " SRCROW2="28 " SRCCOLUMN2="14 " LOCKED="X" TYPESRC_LENG="297 " TYPESRC="begin of INFO,
+      msgid type symsgid value &apos;ZFSAP&apos;,
+      msgno type symsgno value &apos;000&apos;,
+      attr1 type scx_attrname value &apos;ATTR1&apos;,
+      attr2 type scx_attrname value &apos;ATTR2&apos;,
+      attr3 type scx_attrname value &apos;ATTR3&apos;,
+      attr4 type scx_attrname value &apos;ATTR4&apos;,
+    end of INFO
+"/>
+  <attribute CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="TAX_ERROR" VERSION="1" LANGU="E" EXPOSURE="2" STATE="1" EDITORDER="3 " ATTDECLTYP="2" ATTEXPVIRT="0" TYPTYPE="4" SRCROW1="30 " SRCCOLUMN1="4 " SRCROW2="37 " SRCCOLUMN2="19 " LOCKED="X" TYPESRC_LENG="307 " TYPESRC="begin of TAX_ERROR,
+      msgid type symsgid value &apos;ZFSAP&apos;,
+      msgno type symsgno value &apos;001&apos;,
+      attr1 type scx_attrname value &apos;ATTR1&apos;,
+      attr2 type scx_attrname value &apos;ATTR2&apos;,
+      attr3 type scx_attrname value &apos;ATTR3&apos;,
+      attr4 type scx_attrname value &apos;ATTR4&apos;,
+    end of TAX_ERROR
+"/>
+  <inheritance CLSNAME="ZCX_SIMPLE_ACC_POST" REFCLSNAME="CX_NO_CHECK" VERSION="1" STATE="1"/>
+  <method CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="GET_BAPIRET2" VERSION="1" LANGU="E" DESCRIPT="Get a BAPIRET2 structure with exception data" EXPOSURE="2" STATE="1" EDITORDER="2 " DISPID="0 " MTDTYPE="0" MTDDECLTYP="0" BCMTDCAT="00" BCMTDSYN="0">
+   <parameter CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="GET_BAPIRET2" SCONAME="IV_MSGTY" VERSION="1" LANGU="E" DESCRIPT="Message Type" CMPTYPE="1" MTDTYPE="0" EDITORDER="1 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="SY-MSGTY"/>
+   <parameter CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="GET_BAPIRET2" SCONAME="IV_LOG_NO" VERSION="1" LANGU="E" DESCRIPT="Application log: log number" CMPTYPE="1" MTDTYPE="0" EDITORDER="2 " DISPID="0 " PARDECLTYP="0" PARPASSTYP="1" TYPTYPE="1" TYPE="BALOGNR" PAROPTIONL="X"/>
+   <parameter CLSNAME="ZCX_SIMPLE_ACC_POST" CMPNAME="GET_BAPIRET2" SCONAME="ES_BAPIRET2" VERSION="1" LANGU="E" DESCRIPT="BAPIRET2 structure" CMPTYPE="1" MTDTYPE="0" EDITORDER="3 " DISPID="0 " PARDECLTYP="1" PARPASSTYP="0" TYPTYPE="1" TYPE="BAPIRET2"/>
+   <source>METHOD GET_BAPIRET2.
+
+  CLEAR ES_BAPIRET2.
+
+  ES_BAPIRET2-TYPE       = IV_MSGTY.
+  ES_BAPIRET2-ID         = ME-&gt;IF_T100_MESSAGE~T100KEY-MSGID.
+  ES_BAPIRET2-NUMBER     = ME-&gt;IF_T100_MESSAGE~T100KEY-MSGNO.
+  ES_BAPIRET2-MESSAGE    = ME-&gt;IF_MESSAGE~GET_LONGTEXT( ).
+  ES_BAPIRET2-LOG_NO     = IV_LOG_NO.
+  ES_BAPIRET2-LOG_MSG_NO = &apos;&apos;.
+  ES_BAPIRET2-MESSAGE_V1 = ME-&gt;ATTR1.
+  ES_BAPIRET2-MESSAGE_V2 = ME-&gt;ATTR2.
+  ES_BAPIRET2-MESSAGE_V3 = ME-&gt;ATTR3.
+  ES_BAPIRET2-MESSAGE_V4 = ME-&gt;ATTR4.
+  ES_BAPIRET2-PARAMETER  = &apos;&apos;.
+  ES_BAPIRET2-ROW        = &apos;&apos;.
+  ES_BAPIRET2-FIELD      = &apos;&apos;.
+  ES_BAPIRET2-SYSTEM     = &apos;&apos;.
+
+ENDMETHOD.</source>
+  </method>
+ </CLAS>
+ <MSAG ARBGB="ZFSAP" MASTERLANG="E" RESPUSER="SIT9935" STEXT="Message Class for ZCX_SIMPLE_ACC_POST">
+  <t100 SPRSL="E" ARBGB="ZFSAP" MSGNR="000" TEXT="&amp; &amp; &amp; &amp;"/>
+  <t100 SPRSL="E" ARBGB="ZFSAP" MSGNR="001" TEXT="Error calculating tax amount: &amp; &amp; &amp; &amp;"/>
+  <t100t SPRSL="E" ARBGB="ZFSAP" STEXT="Message Class for ZCX_SIMPLE_ACC_POST"/>
+ </MSAG>
+ <PROG NAME="ZTEST_SIMPLE_ACC_POST" VARCL="X" SUBC="1" RMAND="100" RLOAD="E" FIXPT="X" UCCHECK="X">
+  <textPool>
+   <language SPRAS="E">
+    <textElement ID="R" ENTRY="Program ZTEST_SIMPLE_ACC_POST" LENGTH="29 "/>
+   </language>
+  </textPool>
+  <source>*&amp;---------------------------------------------------------------------*
+*&amp; Report  ZTEST_SIMPLE_ACC_POST
+*&amp;
+*&amp;---------------------------------------------------------------------*
+*&amp;
+*&amp;
+*&amp;---------------------------------------------------------------------*
+
+REPORT ZTEST_SIMPLE_ACC_POST.
+
+*&amp;---------------------------------------------------------------------*
+*&amp;       Class LCL_MAIN
+*&amp;---------------------------------------------------------------------*
+*        Main class
+*----------------------------------------------------------------------*
+CLASS LCL_MAIN DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS:
+      BTN_DOWNLOAD_TEMPLATE,  &quot; Download excel template from server
+      BTN_VIEW_TEMPLATE,      &quot; View excel template from server
+      BTN_CB_C_D,             &quot; Check+Display results
+      BTN_CB_P_D,             &quot; Post+Display results
+      BTN_CB_P_D_S,           &quot; Post+Display+Store DB
+      BTN_CB_C_P_L,           &quot; Check+Post+Log
+      BTN_CB_C_P_L_S,         &quot; Check+Post+Log+Store DB
+      BTN_CB_BDC_BI.          &quot; Create Batch Input with BDC
+
+  PRIVATE SECTION.
+    CLASS-METHODS:
+      FILL_ZSIMPLE_ACC_POST IMPORTING IR_SIMPLE_ACC_POST TYPE REF TO ZCL_SIMPLE_ACC_POST.  &quot; Fill and display Z-table
+
+ENDCLASS.               &quot;LCL_MAIN
+
+
+*&amp;---------------------------------------------------------------------*
+*&amp;       Class (Implementation)  LCL_MAIN
+*&amp;---------------------------------------------------------------------*
+*        Main class
+*----------------------------------------------------------------------*
+CLASS LCL_MAIN IMPLEMENTATION.
+
+
+  METHOD BTN_DOWNLOAD_TEMPLATE.
+    DATA: LS_WWWDATA_TAB TYPE WWWDATATAB.
+
+    &quot; Make sure template exists in SMW0 as binary object
+    SELECT SINGLE *
+      FROM WWWDATA INNER JOIN TADIR ON WWWDATA~OBJID = TADIR~OBJ_NAME
+      INTO CORRESPONDING FIELDS OF LS_WWWDATA_TAB
+     WHERE WWWDATA~SRTF2  = 0
+       AND WWWDATA~RELID  = &apos;MI&apos;
+       AND TADIR~PGMID    = &apos;R3TR&apos;
+       AND TADIR~OBJECT   = &apos;W3MI&apos;
+       AND TADIR~OBJ_NAME = &apos;ZSIMPLE_ACC_POST_TEMPLATE&apos;.
+
+    IF SY-SUBRC &lt;&gt; 0.
+      RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+        EXPORTING
+          TEXTID = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+          ATTR1  = &apos;Template not found in SMW0&apos;
+          ATTR2  = &apos;as binary object&apos;
+          ATTR3  = &apos;ZSIMPLE_ACC_POST_TEMPLATE&apos;.
+    ENDIF.
+
+    CALL FUNCTION &apos;DOWNLOAD_WEB_OBJECT&apos;
+      EXPORTING
+        KEY = LS_WWWDATA_TAB.
+
+  ENDMETHOD.                    &quot;BTN_DOWNLOAD_TEMPLATE
+
+
+  METHOD BTN_VIEW_TEMPLATE.
+    DATA: LS_WWWDATA_TAB TYPE WWWDATATAB.
+
+    &quot; Make sure template exists in SMW0 as binary object
+    SELECT SINGLE *
+      FROM WWWDATA INNER JOIN TADIR ON WWWDATA~OBJID = TADIR~OBJ_NAME
+      INTO CORRESPONDING FIELDS OF LS_WWWDATA_TAB
+     WHERE WWWDATA~SRTF2  = 0
+       AND WWWDATA~RELID  = &apos;MI&apos;
+       AND TADIR~PGMID    = &apos;R3TR&apos;
+       AND TADIR~OBJECT   = &apos;W3MI&apos;
+       AND TADIR~OBJ_NAME = &apos;ZSIMPLE_ACC_POST_TEMPLATE&apos;.
+
+    IF SY-SUBRC &lt;&gt; 0.
+      RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+        EXPORTING
+          TEXTID = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+          ATTR1  = &apos;Template not found in SMW0&apos;
+          ATTR2  = &apos;as binary object&apos;
+          ATTR3  = &apos;ZSIMPLE_ACC_POST_TEMPLATE&apos;.
+    ENDIF.
+
+    CALL FUNCTION &apos;SHOW_WEB_OBJECT&apos;
+      EXPORTING
+        KEY               = LS_WWWDATA_TAB
+      EXCEPTIONS
+        CANCELED_BY_USER  = 2
+        PROGRAM_NOT_FOUND = 3.
+
+    IF SY-SUBRC &lt;&gt; 0.
+    ENDIF.
+
+  ENDMETHOD.                    &quot;BTN_VIEW_TEMPLATE
+
+
+  METHOD BTN_CB_P_D.
+    DATA: LR_SIMPLE_ACC_POST TYPE REF TO ZCL_SIMPLE_ACC_POST.
+
+    CREATE OBJECT LR_SIMPLE_ACC_POST.
+
+    LR_SIMPLE_ACC_POST-&gt;POST(
+      EXPORTING
+        IV_CHECK          = ABAP_FALSE    &quot; Only check posting
+        IV_CLIPBOARD_DATA = ABAP_TRUE     &quot; Post clipboard data
+    ).
+
+    LR_SIMPLE_ACC_POST-&gt;DISPLAY_RESULT( ).
+
+  ENDMETHOD.                    &quot;BTN_CB_P_D
+
+
+  METHOD BTN_CB_P_D_S.
+    DATA: LC_ANSWER TYPE C LENGTH 1,
+          LR_SIMPLE_ACC_POST TYPE REF TO ZCL_SIMPLE_ACC_POST.
+
+    CREATE OBJECT LR_SIMPLE_ACC_POST.
+
+    LR_SIMPLE_ACC_POST-&gt;POST(
+      EXPORTING
+        IV_CHECK          = ABAP_FALSE    &quot; Only check posting
+        IV_CLIPBOARD_DATA = ABAP_TRUE     &quot; Post clipboard data
+    ).
+
+    LR_SIMPLE_ACC_POST-&gt;DISPLAY_RESULT( ).
+
+    &quot; Store items into ZSIMPLE_ACC_POST
+    CALL FUNCTION &apos;POPUP_TO_CONFIRM&apos;
+      EXPORTING
+        TEXT_QUESTION = &apos;Do you like store items into ZSIMPLE_ACC_POST?&apos;
+      IMPORTING
+        ANSWER        = LC_ANSWER.
+
+    IF LC_ANSWER = &apos;1&apos;. &quot; Yes
+      LCL_MAIN=&gt;FILL_ZSIMPLE_ACC_POST( IR_SIMPLE_ACC_POST = LR_SIMPLE_ACC_POST ).
+    ENDIF.
+
+  ENDMETHOD.                    &quot;BTN_CB_P_D_S
+
+
+  METHOD BTN_CB_C_D.
+    DATA: LR_SIMPLE_ACC_POST TYPE REF TO ZCL_SIMPLE_ACC_POST.
+
+    CREATE OBJECT LR_SIMPLE_ACC_POST.
+
+    LR_SIMPLE_ACC_POST-&gt;POST(
+      EXPORTING
+        IV_CHECK          = ABAP_TRUE    &quot; Only check posting
+        IV_CLIPBOARD_DATA = ABAP_TRUE    &quot; Post clipboard data
+    ).
+
+    &quot; if exists error display log
+    IF LR_SIMPLE_ACC_POST-&gt;R_MSG_LOG-&gt;HAS_MESSAGES_OF_MSGTY( ID_MSGTY = &apos;E&apos; IF_OR_HIGHER = ABAP_TRUE ) = ABAP_TRUE.
+      LR_SIMPLE_ACC_POST-&gt;DISPLAY_LOG( ).
+    ELSE.
+      LR_SIMPLE_ACC_POST-&gt;DISPLAY_RESULT( ).
+    ENDIF.
+
+  ENDMETHOD.                    &quot;BTN_CB_C_D
+
+
+  METHOD BTN_CB_C_P_L.
+    DATA: LC_ANSWER TYPE C LENGTH 1,
+          LR_SIMPLE_ACC_POST TYPE REF TO ZCL_SIMPLE_ACC_POST.
+
+    &quot; Create main object
+    CREATE OBJECT LR_SIMPLE_ACC_POST.
+
+    &quot; Check clipboard data. First line must be field names. (See ZFIS_SIMPLE_ACCPOST)
+    LR_SIMPLE_ACC_POST-&gt;POST(
+      EXPORTING
+        IV_CHECK          = ABAP_TRUE    &quot; Only check posting
+        IV_CLIPBOARD_DATA = ABAP_TRUE    &quot; Post clipboard data
+    ).
+    LR_SIMPLE_ACC_POST-&gt;DISPLAY_LOG( ).
+
+    &quot; If no errors messages, make real post.
+    IF LR_SIMPLE_ACC_POST-&gt;R_MSG_LOG-&gt;HAS_MESSAGES_OF_MSGTY( ID_MSGTY = &apos;E&apos; IF_OR_HIGHER = ABAP_TRUE ) = ABAP_FALSE.
+
+      CALL FUNCTION &apos;POPUP_TO_CONFIRM&apos;
+        EXPORTING
+          TEXT_QUESTION = &apos;Post documents?&apos;
+        IMPORTING
+          ANSWER        = LC_ANSWER.
+
+      IF LC_ANSWER = &apos;1&apos;. &quot; Yes
+
+        &quot; Post clipboard data. First line must be field names. (See ZFIS_SIMPLE_ACCPOST)
+        LR_SIMPLE_ACC_POST-&gt;POST( EXPORTING IV_CLIPBOARD_DATA = ABAP_TRUE ).
+        LR_SIMPLE_ACC_POST-&gt;DISPLAY_LOG( ).
+
+*       IF SY-UNAME = &apos;SIT9935&apos;.
+*         ZCX_FI=&gt;POPUP_TABLA( EXPORTING I_HEADER = &apos;ME-&gt;T_ACCPOST&apos;     CHANGING CT_TABLA = GR_MAIN-&gt;R_SIMPLE_ACC_POST-&gt;T_ACCPOST ).
+*         ZCX_FI=&gt;POPUP_TABLA( EXPORTING I_HEADER = &apos;ME-&gt;T_ACCPOST_DOC&apos; CHANGING CT_TABLA = GR_MAIN-&gt;R_SIMPLE_ACC_POST-&gt;T_ACCPOST_DOC ).
+*         ZCX_FI=&gt;POPUP_TABLA( EXPORTING I_HEADER = &apos;ME-&gt;T_ACCPOST_MSG&apos; CHANGING CT_TABLA = GR_MAIN-&gt;R_SIMPLE_ACC_POST-&gt;T_ACCPOST_MSG ).
+*       ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+  ENDMETHOD.                    &quot;BTN_CB_C_P_L
+
+
+  METHOD BTN_CB_C_P_L_S.
+    DATA: LR_SIMPLE_ACC_POST TYPE REF TO ZCL_SIMPLE_ACC_POST,
+          LC_ANSWER TYPE C LENGTH 1,
+          LS_ACCPOST TYPE LINE OF ZCL_SIMPLE_ACC_POST=&gt;TT_ACCPOST.
+
+
+    &quot; Create main object
+    CREATE OBJECT LR_SIMPLE_ACC_POST.
+
+    &quot; Check clipboard data. First line must be field names. (See ZFIS_SIMPLE_ACCPOST)
+    LR_SIMPLE_ACC_POST-&gt;POST(
+      EXPORTING
+        IV_CHECK          = ABAP_TRUE    &quot; Only check posting
+        IV_CLIPBOARD_DATA = ABAP_TRUE    &quot; Post clipboard data
+    ).
+    LR_SIMPLE_ACC_POST-&gt;DISPLAY_LOG( ).
+
+    &quot; If no errors messages, make real post.
+    IF LR_SIMPLE_ACC_POST-&gt;R_MSG_LOG-&gt;HAS_MESSAGES_OF_MSGTY( ID_MSGTY = &apos;E&apos; IF_OR_HIGHER = ABAP_TRUE ) = ABAP_FALSE.
+
+      CALL FUNCTION &apos;POPUP_TO_CONFIRM&apos;
+        EXPORTING
+          TEXT_QUESTION = &apos;Post documents?&apos;
+        IMPORTING
+          ANSWER        = LC_ANSWER.
+
+      IF LC_ANSWER = &apos;1&apos;. &quot; Yes
+
+        &quot; Post clipboard data. First line must be field names. (See ZFIS_SIMPLE_ACCPOST)
+        LR_SIMPLE_ACC_POST-&gt;POST( EXPORTING IV_CLIPBOARD_DATA = ABAP_TRUE ).
+        LR_SIMPLE_ACC_POST-&gt;DISPLAY_LOG( ).
+
+*       IF SY-UNAME = &apos;SIT9935&apos;.
+*         ZCX_FI=&gt;POPUP_TABLA( EXPORTING I_HEADER = &apos;ME-&gt;T_ACCPOST&apos;     CHANGING CT_TABLA = GR_MAIN-&gt;R_SIMPLE_ACC_POST-&gt;T_ACCPOST ).
+*         ZCX_FI=&gt;POPUP_TABLA( EXPORTING I_HEADER = &apos;ME-&gt;T_ACCPOST_DOC&apos; CHANGING CT_TABLA = GR_MAIN-&gt;R_SIMPLE_ACC_POST-&gt;T_ACCPOST_DOC ).
+*         ZCX_FI=&gt;POPUP_TABLA( EXPORTING I_HEADER = &apos;ME-&gt;T_ACCPOST_MSG&apos; CHANGING CT_TABLA = GR_MAIN-&gt;R_SIMPLE_ACC_POST-&gt;T_ACCPOST_MSG ).
+*       ENDIF.
+      ENDIF.
+
+    ENDIF.
+
+    &quot; Store items into ZSIMPLE_ACC_POST
+    CALL FUNCTION &apos;POPUP_TO_CONFIRM&apos;
+      EXPORTING
+        TEXT_QUESTION = &apos;Do you like store items into ZSIMPLE_ACC_POST?&apos;
+      IMPORTING
+        ANSWER        = LC_ANSWER.
+
+    IF LC_ANSWER = &apos;1&apos;. &quot; Yes
+      LCL_MAIN=&gt;FILL_ZSIMPLE_ACC_POST( IR_SIMPLE_ACC_POST = LR_SIMPLE_ACC_POST ).
+    ENDIF.
+
+  ENDMETHOD.                    &quot;BTN_CB_C_P_L_S
+
+
+  METHOD FILL_ZSIMPLE_ACC_POST.
+    DATA: LS_ZSIMPLE_ACC_POST TYPE ZSIMPLE_ACC_POST,
+          LV_ID TYPE N LENGTH 10,
+          LS_ACCPOST TYPE LINE OF ZCL_SIMPLE_ACC_POST=&gt;TT_ACCPOST.
+
+
+    &quot; Get next ID. (Max+1 for test purposes only. This should be a object of SNUM on production environment)
+    SELECT MAX( ID ) FROM ZSIMPLE_ACC_POST INTO LV_ID.
+    IF LV_ID IS INITIAL.
+      LV_ID = &apos;0000000001&apos;.
+    ELSE.
+      ADD 1 TO LV_ID.
+    ENDIF.
+
+    &quot; Loop items
+    LOOP AT IR_SIMPLE_ACC_POST-&gt;T_ACCPOST INTO LS_ACCPOST.
+
+      CLEAR LS_ZSIMPLE_ACC_POST.
+
+      LS_ZSIMPLE_ACC_POST-ID = LV_ID.
+      LS_ZSIMPLE_ACC_POST-NO_ITEM = SY-TABIX.
+      MOVE-CORRESPONDING LS_ACCPOST TO LS_ZSIMPLE_ACC_POST.
+
+      INSERT INTO ZSIMPLE_ACC_POST VALUES LS_ZSIMPLE_ACC_POST.
+
+      IF SY-SUBRC &lt;&gt; 0.
+        RAISE EXCEPTION TYPE ZCX_SIMPLE_ACC_POST
+          EXPORTING
+            TEXTID = ZCX_SIMPLE_ACC_POST=&gt;ERROR
+            ATTR1  = &apos;Error inserting on ZSIMPLE_ACC_POST&apos;
+            ATTR2  = |{ SY-SUBRC }|
+            ATTR3  = |{ LV_ID }|
+            ATTR4  = |{ SY-TABIX }|.
+      ENDIF.
+
+    ENDLOOP.
+
+    &quot; Show items stored
+    DATA: LT_SELFIELDS TYPE STANDARD TABLE OF SE16N_SELTAB,
+          LS_SELFIELDS TYPE SE16N_SELTAB.
+
+    CLEAR LS_SELFIELDS.
+
+    LS_SELFIELDS-FIELD = &apos;ID&apos;.
+    LS_SELFIELDS-SIGN = &apos;I&apos;.
+    LS_SELFIELDS-OPTION = &apos;EQ&apos;.
+    LS_SELFIELDS-LOW = LV_ID.
+
+    APPEND LS_SELFIELDS TO LT_SELFIELDS.
+
+    CALL FUNCTION &apos;SE16N_INTERFACE&apos;
+      EXPORTING
+        I_TAB        = &apos;ZSIMPLE_ACC_POST&apos;
+      TABLES
+        IT_SELFIELDS = LT_SELFIELDS
+      EXCEPTIONS
+        NO_VALUES    = 1
+        OTHERS       = 2.
+    IF SY-SUBRC &lt;&gt; 0.
+      MESSAGE ID SY-MSGID TYPE SY-MSGTY NUMBER SY-MSGNO
+                 WITH SY-MSGV1 SY-MSGV2 SY-MSGV3 SY-MSGV4.
+    ENDIF.
+
+  ENDMETHOD.                    &quot;FILL_ZSIMPLE_ACC_POST
+
+
+  METHOD BTN_CB_BDC_BI.
+    DATA: LR_SIMPLE_ACC_POST TYPE REF TO ZCL_SIMPLE_ACC_POST.
+
+    CREATE OBJECT LR_SIMPLE_ACC_POST.
+
+    LR_SIMPLE_ACC_POST-&gt;BDC_POST(
+      EXPORTING
+        IV_CLIPBOARD_DATA = ABAP_TRUE     &quot; Post clipboard data
+    ).
+
+    LR_SIMPLE_ACC_POST-&gt;DISPLAY_LOG( ).
+
+  ENDMETHOD.                    &quot;BTN_CB_BDC_BI
+
+
+ENDCLASS.               &quot;LCL_MAIN
+
+
+&quot; -------------------------------------------------------------------------------------------------------------------------------------------------------------
+&quot; Selections screen -------------------------------------------------------------------------------------------------------------------------------------------
+&quot; -------------------------------------------------------------------------------------------------------------------------------------------------------------
+TABLES: SSCRFIELDS.
+INCLUDE: &lt;ICON&gt;.
+DATA: GS_SEL_BUTTON TYPE SMP_DYNTXT.
+
+SELECTION-SCREEN: BEGIN OF SCREEN 100.
+
+SELECTION-SCREEN FUNCTION KEY 1.
+SELECTION-SCREEN FUNCTION KEY 2.
+
+SELECTION-SCREEN BEGIN OF BLOCK B1 WITH FRAME TITLE B1_TITLE.
+SELECTION-SCREEN PUSHBUTTON /2(40) B_CBCD   USER-COMMAND BTN_CB_C_D.
+SELECTION-SCREEN PUSHBUTTON /2(40) B_CBPD   USER-COMMAND BTN_CB_P_D.
+SELECTION-SCREEN PUSHBUTTON /2(40) B_CBPDS  USER-COMMAND BTN_CB_P_D_S.
+SELECTION-SCREEN PUSHBUTTON /2(40) B_CBCPL  USER-COMMAND BTN_CB_C_P_L.
+SELECTION-SCREEN PUSHBUTTON /2(40) B_CBCPLS USER-COMMAND BTN_CB_C_P_L_S.
+SELECTION-SCREEN PUSHBUTTON /2(40) B_CBBDC1 USER-COMMAND BTN_CB_BDC_BI.
+SELECTION-SCREEN END OF BLOCK B1.
+
+SELECTION-SCREEN: END OF SCREEN 100.
+
+AT SELECTION-SCREEN OUTPUT.
+
+  GS_SEL_BUTTON-ICON_ID = ICON_EXPORT.
+  GS_SEL_BUTTON-ICON_TEXT = &apos;Download template&apos;.
+  SSCRFIELDS-FUNCTXT_01 = GS_SEL_BUTTON.
+
+  GS_SEL_BUTTON-ICON_ID = ICON_DISPLAY.
+  GS_SEL_BUTTON-ICON_TEXT = &apos;View template&apos;.
+  SSCRFIELDS-FUNCTXT_02 = GS_SEL_BUTTON.
+
+  B1_TITLE = &apos;Clipboard&apos;.
+  B_CBCD   = &apos;Check + Dialog&apos;.
+  B_CBPD   = &apos;Post + Dialog&apos;.
+  B_CBPDS  = &apos;Post + Dialog + Store DB&apos;.
+  B_CBCPL  = &apos;Check + Post + Log&apos;.
+  B_CBCPLS = &apos;Check + Post + Log + Store DB&apos;.
+  B_CBBDC1 = &apos;BDC + BI&apos;.
+
+AT SELECTION-SCREEN.
+  IF SY-DYNNR = &apos;0100&apos;.
+    CASE SSCRFIELDS-UCOMM.
+      WHEN &apos;FC01&apos;.
+        LCL_MAIN=&gt;BTN_DOWNLOAD_TEMPLATE( ).
+      WHEN &apos;FC02&apos;.
+        LCL_MAIN=&gt;BTN_VIEW_TEMPLATE( ).
+      WHEN &apos;BTN_CB_C_D&apos;.
+        LCL_MAIN=&gt;BTN_CB_C_D( ).
+      WHEN &apos;BTN_CB_P_D&apos;.
+        LCL_MAIN=&gt;BTN_CB_P_D( ).
+      WHEN &apos;BTN_CB_P_D_S&apos;.
+        LCL_MAIN=&gt;BTN_CB_P_D_S( ).
+      WHEN &apos;BTN_CB_C_P_L&apos;.
+        LCL_MAIN=&gt;BTN_CB_C_P_L( ).
+      WHEN &apos;BTN_CB_C_P_L_S&apos;.
+        LCL_MAIN=&gt;BTN_CB_C_P_L_S( ).
+      WHEN &apos;BTN_CB_BDC_BI&apos;.
+        LCL_MAIN=&gt;BTN_CB_BDC_BI( ).
+      WHEN OTHERS.
+    ENDCASE.
+  ENDIF.
+
+
+  &quot; -------------------------------------------------------------------------------------------------------------------------------------------------------------
+  &quot; Main --------------------------------------------------------------------------------------------------------------------------------------------------------
+  &quot; -------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+START-OF-SELECTION.
+
+  DATA: GR_CX_ROOT TYPE REF TO CX_ROOT.
+
+  TRY.
+
+      &quot; Only show buttons
+      CALL SELECTION-SCREEN 100.
+
+    CATCH CX_ROOT INTO GR_CX_ROOT.
+      DATA: LC_MESSAGE TYPE STRING.
+      LC_MESSAGE = GR_CX_ROOT-&gt;GET_LONGTEXT( ).
+*      MESSAGE LC_MESSAGE TYPE &apos;E&apos;.
+      BREAK-POINT.
+      LEAVE PROGRAM.
+  ENDTRY.</source>
+ </PROG>
+ <TABL TABNAME="ZFIS_SIMPLE_ACCPOST" TABCLASS="INTTAB" DATMIN="0000000000" DATMAX="0000000000" DATAVG="0000000000" AUTHCLASS="00" PROZPUFF="000" EXCLASS="3">
+  <dd09l AS4VERS="0000" SCHFELDANZ="000"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="ID_ACCDOC" POSITION="0001" ADMINFIELD="0" INTTYPE="C" INTLEN="000510" ROUTPUTLEN="000000" HEADLEN="00" SCRLEN1="00" SCRLEN2="00" SCRLEN3="00" DATATYPE="CHAR" LENG="000255" OUTPUTLEN="000000" DECIMALS="000000" MASK="  CHAR" MASKLEN="0000" DEPTH="00" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="AWTYP" DDLANGUAGE="S" POSITION="0002" ROLLNAME="AWTYP" ADMINFIELD="0" INTTYPE="C" INTLEN="000010" DOMNAME="AWTYP" ROUTPUTLEN="000000" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000005" OUTPUTLEN="000005" DECIMALS="000000" ENTITYTAB="TTYP" MASK="  CHARE" MASKLEN="0000" DDTEXT="Operación de referencia" REPTEXT="Oper.ref." SCRTEXT_S="Oper.ref." SCRTEXT_M="Op.referencia" SCRTEXT_L="Operación referencia" DOMNAME3L="AWTYP" DEPTH="00" COMPTYPE="E" DEFFDNAME="OBJ_TYPE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="AWKEY" DDLANGUAGE="S" POSITION="0003" ROLLNAME="AWKEY" ADMINFIELD="0" INTTYPE="C" INTLEN="000040" DOMNAME="AWKEY" ROUTPUTLEN="000000" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="25" DTELMASTER="D" DATATYPE="CHAR" LENG="000020" OUTPUTLEN="000020" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de referencia" REPTEXT="Clave ref." SCRTEXT_S="Clave ref." SCRTEXT_M="Clv.referencia" SCRTEXT_L="Clave de referencia" DOMNAME3L="AWKEY" DEPTH="00" COMPTYPE="E" DEFFDNAME="OBJ_KEY" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="AWSYS" DDLANGUAGE="S" POSITION="0004" ROLLNAME="AWSYS" ADMINFIELD="0" INTTYPE="C" INTLEN="000020" DOMNAME="LOGSYS" ROUTPUTLEN="000000" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="TBDLS" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Sistema lógico documento de origen" REPTEXT="Sist.lóg." SCRTEXT_S="Sist.lóg." SCRTEXT_M="Sist.lógico" SCRTEXT_L="Sistema lógico orig." DOMMASTER="D" DOMNAME3L="LOGSYS" DEPTH="00" COMPTYPE="E" DEFFDNAME="OBJ_SYS" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="BUKRS" DDLANGUAGE="S" POSITION="0005" ROLLNAME="BUKRS" ADMINFIELD="0" INTTYPE="C" INTLEN="000008" DOMNAME="BUKRS" ROUTPUTLEN="000000" MEMORYID="BUK" LOGFLAG="X" HEADLEN="04" SCRLEN1="06" SCRLEN2="15" SCRLEN3="15" DTELMASTER="D" DATATYPE="CHAR" LENG="000004" OUTPUTLEN="000004" DECIMALS="000000" ENTITYTAB="T001" MASK="  CHARE" MASKLEN="0000" DDTEXT="Sociedad" REPTEXT="Soc." SCRTEXT_S="Soc." SCRTEXT_M="Sociedad" SCRTEXT_L="Sociedad" DOMNAME3L="BUKRS" SHLPORIGIN="D" SHLPNAME="C_T001" SHLPFIELD="BUKRS" DEPTH="00" COMPTYPE="E" DEFFDNAME="COMP_CODE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="BLART" DDLANGUAGE="S" POSITION="0006" ROLLNAME="BLART" ADMINFIELD="0" INTTYPE="C" INTLEN="000004" DOMNAME="BLART" ROUTPUTLEN="000000" MEMORYID="BAR" LOGFLAG="X" HEADLEN="10" SCRLEN1="06" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" ENTITYTAB="T003" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clase de documento" REPTEXT="Clase doc." SCRTEXT_S="Clase" SCRTEXT_M="Clase documento" SCRTEXT_L="Clase de documento" DOMNAME3L="BLART" DEPTH="00" COMPTYPE="E" DEFFDNAME="DOC_TYPE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="BLDAT" DDLANGUAGE="S" POSITION="0007" ROLLNAME="BLDAT" ADMINFIELD="0" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha de documento en documento" REPTEXT="Fecha doc." SCRTEXT_S="Fecha doc." SCRTEXT_M="Fecha documento" SCRTEXT_L="Fecha de documento" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" DEFFDNAME="DOC_DATE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="BUDAT" DDLANGUAGE="S" POSITION="0008" ROLLNAME="BUDAT" ADMINFIELD="0" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha de contabilización en el documento" REPTEXT="Fe.contab." SCRTEXT_S="Fe.contab." SCRTEXT_M="Fecha contab." SCRTEXT_L="Fe.contabilización" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" DEFFDNAME="PSTNG_DATE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="MONAT" DDLANGUAGE="S" POSITION="0009" ROLLNAME="MONAT" ADMINFIELD="0" INTTYPE="N" INTLEN="000004" DOMNAME="MONAT" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="00" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="NUMC" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" MASK="  NUMCE" MASKLEN="0000" DDTEXT="Mes contable" SCRTEXT_S="Período" SCRTEXT_M="Período" SCRTEXT_L="Período contable" DOMNAME3L="MONAT" DEPTH="00" COMPTYPE="E" DEFFDNAME="FIS_PERIOD" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="VATDATE" DDLANGUAGE="S" POSITION="0010" ROLLNAME="VATDATE" ADMINFIELD="0" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha decl.impuesto" REPTEXT="FechaDecl" SCRTEXT_S="FechaDecl" SCRTEXT_M="FechDeclImpuest" SCRTEXT_L="Fecha decl.impuesto" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="WAERS" DDLANGUAGE="S" POSITION="0011" ROLLNAME="WAERS" ADMINFIELD="0" INTTYPE="C" INTLEN="000010" DOMNAME="WAERS" ROUTPUTLEN="000000" MEMORYID="FWS" LOGFLAG="X" HEADLEN="05" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CUKY" LENG="000005" OUTPUTLEN="000005" DECIMALS="000000" ENTITYTAB="TCURC" MASK="  CUKYE" MASKLEN="0000" DDTEXT="Clave de moneda" REPTEXT="Mon." SCRTEXT_S="Moneda" SCRTEXT_M="Moneda" SCRTEXT_L="Moneda" DOMNAME3L="WAERS" DEPTH="00" COMPTYPE="E" DEFFDNAME="CURRENCY" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="XBLNR" DDLANGUAGE="S" POSITION="0012" ROLLNAME="XBLNR" ADMINFIELD="0" INTTYPE="C" INTLEN="000032" DOMNAME="XBLNR" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="16" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000016" OUTPUTLEN="000016" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de documento de referencia" REPTEXT="Referencia" SCRTEXT_S="Referencia" SCRTEXT_M="Referencia" SCRTEXT_L="Referencia" DOMNAME3L="XBLNR" DEPTH="00" COMPTYPE="E" DEFFDNAME="REF_DOC_NO" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="BKTXT" DDLANGUAGE="S" POSITION="0013" ROLLNAME="BKTXT" ADMINFIELD="0" INTTYPE="C" INTLEN="000050" DOMNAME="TEXT25" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="25" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000025" OUTPUTLEN="000025" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Texto de cabecera de documento" REPTEXT="Texto cab.documento" SCRTEXT_S="Txt.cabec." SCRTEXT_M="Txt.cab.doc." SCRTEXT_L="Texto cab.documento" DOMNAME3L="TEXT25" DEPTH="00" COMPTYPE="E" DEFFDNAME="HEADER_TXT" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="KUNNR" DDLANGUAGE="S" POSITION="0014" ROLLNAME="KUNNR" ADMINFIELD="0" INTTYPE="C" INTLEN="000020" DOMNAME="KUNNR" ROUTPUTLEN="000000" MEMORYID="KUN" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="KNA1" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de deudor" REPTEXT="Cliente" SCRTEXT_S="Cliente" SCRTEXT_M="Cliente" SCRTEXT_L="Cliente" DOMNAME3L="KUNNR" SHLPORIGIN="D" SHLPNAME="C_KUNNR" SHLPFIELD="KUNNR" DEPTH="00" COMPTYPE="E" DEFFDNAME="CUSTOMER" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="LIFNR" DDLANGUAGE="S" POSITION="0015" ROLLNAME="LIFNR" ADMINFIELD="0" INTTYPE="C" INTLEN="000020" DOMNAME="LIFNR" ROUTPUTLEN="000000" MEMORYID="LIF" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="LFA1" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de cuenta del proveedor o acreedor" REPTEXT="Acreedor" SCRTEXT_S="Acreedor" SCRTEXT_M="Acreedor" SCRTEXT_L="Acreedor" DOMNAME3L="LIFNR" SHLPORIGIN="D" SHLPNAME="KRED_C" SHLPFIELD="LIFNR" DEPTH="00" COMPTYPE="E" DEFFDNAME="VENDOR_NO" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="UMSKS" DDLANGUAGE="S" POSITION="0016" ROLLNAME="UMSKS" ADMINFIELD="0" INTTYPE="C" INTLEN="000002" DOMNAME="UMSKS" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="11" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000001" OUTPUTLEN="000001" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clase de operación en cuenta de mayor especial" REPTEXT="Cl.oper." SCRTEXT_S="Oper.CME" SCRTEXT_M="Cl.oper.CME" SCRTEXT_L="Clase operación CME" DOMNAME3L="UMSKS" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="HKONT" DDLANGUAGE="S" POSITION="0017" ROLLNAME="HKONT" ADMINFIELD="0" INTTYPE="C" INTLEN="000020" DOMNAME="SAKNR" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="07" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="SKA1" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Cuenta de mayor de la contabilidad principal" REPTEXT="Lib.mayor" SCRTEXT_S="LibrMay" SCRTEXT_M="Libro mayor" SCRTEXT_L="Cuenta de mayor" DOMNAME3L="SAKNR" DEPTH="00" COMPTYPE="E" DEFFDNAME="GL_ACCOUNT" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="WRBTR" DDLANGUAGE="S" POSITION="0018" ROLLNAME="BAPIDOCCUR" ADMINFIELD="0" INTTYPE="P" INTLEN="000012" DOMNAME="BAPICURR1" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DEC" LENG="000023" OUTPUTLEN="000031" DECIMALS="000004" SIGNFLAG="X" MASK="  DEC E" MASKLEN="0000" DDTEXT="Importe en moneda de documento" REPTEXT="Importe" SCRTEXT_S="Importe" SCRTEXT_M="Importe" SCRTEXT_L="Importe" DOMMASTER="D" DOMNAME3L="BAPICURR1" DEPTH="00" COMPTYPE="E" DEFFDNAME="AMT_DOCCUR" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="VALUT" DDLANGUAGE="S" POSITION="0019" ROLLNAME="VALUT" ADMINFIELD="0" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha valor" REPTEXT="Fe.valor" SCRTEXT_S="Fe.valor" SCRTEXT_M="Fecha valor" SCRTEXT_L="Fecha valor" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" DEFFDNAME="VALUE_DATE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="SGTXT" DDLANGUAGE="S" POSITION="0020" ROLLNAME="SGTXT" ADMINFIELD="0" INTTYPE="C" INTLEN="000100" DOMNAME="TEXT50" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="50" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000050" OUTPUTLEN="000050" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Texto posición" REPTEXT="Texto" SCRTEXT_S="Texto" SCRTEXT_M="Texto" SCRTEXT_L="Texto" DOMNAME3L="TEXT50" DEPTH="00" COMPTYPE="E" DEFFDNAME="ITEM_TEXT" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="ZUONR" DDLANGUAGE="S" POSITION="0021" ROLLNAME="DZUONR" ADMINFIELD="0" INTTYPE="C" INTLEN="000036" DOMNAME="ZUONR" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="18" SCRLEN1="10" SCRLEN2="12" SCRLEN3="15" DTELMASTER="D" DATATYPE="CHAR" LENG="000018" OUTPUTLEN="000018" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de asignación" REPTEXT="Asignación" SCRTEXT_S="Asign." SCRTEXT_M="Asignación" SCRTEXT_L="Asignación" DOMNAME3L="ZUONR" DEPTH="00" COMPTYPE="E" DEFFDNAME="ALLOC_NMBR" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="MWSKZ" DDLANGUAGE="S" POSITION="0022" ROLLNAME="MWSKZ" ADMINFIELD="0" INTTYPE="C" INTLEN="000004" DOMNAME="MWSKZ" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="02" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" ENTITYTAB="T007A" MASK="  CHARE" MASKLEN="0000" DDTEXT="Indicador IVA" REPTEXT="II" SCRTEXT_S="Ind.imp." SCRTEXT_M="Ind.impuestos" SCRTEXT_L="Indicador impuestos" DOMNAME3L="MWSKZ" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_CODE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="KOSTL" DDLANGUAGE="S" POSITION="0023" ROLLNAME="KOSTL" ADMINFIELD="0" INTTYPE="C" INTLEN="000020" DOMNAME="KOSTL" ROUTPUTLEN="000000" MEMORYID="KOS" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="CSKS" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Centro de coste" REPTEXT="Ce.coste" SCRTEXT_S="Ce.coste" SCRTEXT_M="Centro coste" SCRTEXT_L="Centro de coste" DOMNAME3L="KOSTL" DEPTH="00" COMPTYPE="E" DEFFDNAME="COSTCENTER" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="POSID" DDLANGUAGE="S" POSITION="0024" ROLLNAME="PS_POSID" ADMINFIELD="0" INTTYPE="C" INTLEN="000048" DOMNAME="PS_POSID" ROUTPUTLEN="000000" MEMORYID="PRO" LOGFLAG="X" HEADLEN="24" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000024" OUTPUTLEN="000024" DECIMALS="000000" CONVEXIT="ABPSN" MASK="  CHARE" MASKLEN="0000" DDTEXT="Elemento del plan de estructura de proyecto (elemento PEP)" REPTEXT="Elemento PEP" SCRTEXT_S="Elem.PEP" SCRTEXT_M="Elemento PEP" SCRTEXT_L="Elemento PEP" DOMNAME3L="PS_POSID" DEPTH="00" COMPTYPE="E" DEFFDNAME="WBS_ELEMENT" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="XREF1" DDLANGUAGE="S" POSITION="0025" ROLLNAME="XREF1" ADMINFIELD="0" INTTYPE="C" INTLEN="000024" DOMNAME="CHAR12" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="12" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000012" OUTPUTLEN="000012" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de referencia de interlocutor comercial" REPTEXT="Clv.ref.1" SCRTEXT_S="Clv.ref.1" SCRTEXT_M="Clave ref.1" SCRTEXT_L="Clave referencia 1" DOMNAME3L="CHAR12" DEPTH="00" COMPTYPE="E" DEFFDNAME="REF_KEY_1" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="XREF2" DDLANGUAGE="S" POSITION="0026" ROLLNAME="XREF2" ADMINFIELD="0" INTTYPE="C" INTLEN="000024" DOMNAME="CHAR12" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="12" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000012" OUTPUTLEN="000012" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de referencia de interlocutor comercial" REPTEXT="Clv.ref.2" SCRTEXT_S="Clv.ref.2" SCRTEXT_M="Clave ref.2" SCRTEXT_L="Clave referencia 2" DOMNAME3L="CHAR12" DEPTH="00" COMPTYPE="E" DEFFDNAME="REF_KEY_2" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="XREF3" DDLANGUAGE="S" POSITION="0027" ROLLNAME="XREF3" ADMINFIELD="0" INTTYPE="C" INTLEN="000040" DOMNAME="CHAR20" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="12" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000020" OUTPUTLEN="000020" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de referencia para la posición de documento" REPTEXT="Clv.ref.3" SCRTEXT_S="Clv.ref.3" SCRTEXT_M="Clave ref. 3" SCRTEXT_L="Clave referencia 3" DOMNAME3L="CHAR20" DEPTH="00" COMPTYPE="E" DEFFDNAME="REF_KEY_3" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="ZTERM" DDLANGUAGE="S" POSITION="0028" ROLLNAME="ACPI_ZTERM" ADMINFIELD="0" INTTYPE="C" INTLEN="000008" DOMNAME="CHAR4" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="04" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000004" OUTPUTLEN="000004" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de condiciones de pago" REPTEXT="CPag" SCRTEXT_S="Cond.pago" SCRTEXT_M="Condic.pago" SCRTEXT_L="Condiciones de pago" DOMNAME3L="CHAR4" DEPTH="00" COMPTYPE="E" DEFFDNAME="PMNTTRMS" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="ZFBDT" DDLANGUAGE="S" POSITION="0029" ROLLNAME="ACPI_ZFBDT" ADMINFIELD="0" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha base para el cálculo del vencimiento" REPTEXT="Fe.base" SCRTEXT_S="Fe.base" SCRTEXT_M="Fecha base" SCRTEXT_L="Fe.base p.plazo pago" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" DEFFDNAME="BLINE_DATE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="ZBD1T" DDLANGUAGE="S" POSITION="0030" ROLLNAME="ACPI_ZBD1T" ADMINFIELD="0" INTTYPE="P" INTLEN="000002" DOMNAME="ZBDXT" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="04" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DEC" LENG="000003" OUTPUTLEN="000003" DECIMALS="000000" MASK="  DEC E" MASKLEN="0000" DDTEXT="Días del descuento por pronto pago 1" REPTEXT="Día1" SCRTEXT_S="Días" SCRTEXT_M="Días" SCRTEXT_L="Días" DOMNAME3L="ZBDXT" DEPTH="00" COMPTYPE="E" DEFFDNAME="DSCT_DAYS1" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="ZLSCH" DDLANGUAGE="S" POSITION="0031" ROLLNAME="ACPI_ZLSCH" ADMINFIELD="0" INTTYPE="C" INTLEN="000002" DOMNAME="ZLSCH" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="02" SCRLEN1="10" SCRLEN2="12" SCRLEN3="15" DTELMASTER="D" DATATYPE="CHAR" LENG="000001" OUTPUTLEN="000001" DECIMALS="000000" ENTITYTAB="T042Z" MASK="  CHARE" MASKLEN="0000" DDTEXT="Vía de pago" REPTEXT="VP" SCRTEXT_S="Vía pago" SCRTEXT_M="Vía de pago" SCRTEXT_L="Vía de pago" DOMNAME3L="ZLSCH" DEPTH="00" COMPTYPE="E" DEFFDNAME="PYMT_METH" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="ZLSPR" DDLANGUAGE="S" POSITION="0032" ROLLNAME="ACPI_ZLSPR" ADMINFIELD="0" INTTYPE="C" INTLEN="000002" DOMNAME="CHAR1" ROUTPUTLEN="000000" MEMORYID="SPE" LOGFLAG="X" HEADLEN="03" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000001" OUTPUTLEN="000001" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave para bloqueo de pago" REPTEXT="BP" SCRTEXT_S="Bloq.pago" SCRTEXT_M="Bloqueo pago" SCRTEXT_L="Bloqueo de pagos" DOMNAME3L="CHAR1" DEPTH="00" COMPTYPE="E" DEFFDNAME="PMNT_BLOCK" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="HBKID" DDLANGUAGE="S" POSITION="0033" ROLLNAME="HBKID" ADMINFIELD="0" INTTYPE="C" INTLEN="000010" DOMNAME="HBKID" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="08" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000005" OUTPUTLEN="000005" DECIMALS="000000" ENTITYTAB="T012" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave breve para banco propio" REPTEXT="Bco.prp." SCRTEXT_S="Bco.prop." SCRTEXT_M="Banco propio" SCRTEXT_L="Banco propio" DOMNAME3L="HBKID" DEPTH="00" COMPTYPE="E" DEFFDNAME="HOUSEBANKID" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="HKTID" DDLANGUAGE="S" POSITION="0034" ROLLNAME="HKTID" ADMINFIELD="0" INTTYPE="C" INTLEN="000010" DOMNAME="HKTID" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="09" SCRLEN1="10" SCRLEN2="15" SCRLEN3="25" DTELMASTER="D" DATATYPE="CHAR" LENG="000005" OUTPUTLEN="000005" DECIMALS="000000" ENTITYTAB="T012K" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave breve para un banco/cuenta" REPTEXT="ID.cta." SCRTEXT_S="ID.cta." SCRTEXT_M="ID.cuenta" SCRTEXT_L="ID de cuenta" DOMNAME3L="HKTID" DEPTH="00" COMPTYPE="E" DEFFDNAME="HOUSEBANKACCTID" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="WITHT" DDLANGUAGE="S" POSITION="0035" ROLLNAME="WITHT" ADMINFIELD="0" INTTYPE="C" INTLEN="000004" DOMNAME="WITHT" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="16" SCRLEN1="10" SCRLEN2="16" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" ENTITYTAB="T059P" MASK="  CHARE" MASKLEN="0000" DDTEXT="Indicador para tipo de retenciones" REPTEXT="Tipo retenciones" SCRTEXT_S="Tp.retenc." SCRTEXT_M="Tipo retenciones" SCRTEXT_L="Tipo de retenciones" DOMMASTER="D" DOMNAME3L="WITHT" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="WT_WITHCD" DDLANGUAGE="S" POSITION="0036" ROLLNAME="WT_WITHCD" ADMINFIELD="0" INTTYPE="C" INTLEN="000004" DOMNAME="WT_WITHCD" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="03" SCRLEN1="10" SCRLEN2="16" SCRLEN3="24" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" ENTITYTAB="T059Z" MASK="  CHARE" MASKLEN="0000" DDTEXT="Indicador de retención" REPTEXT="Ret" SCRTEXT_S="Ind.ret." SCRTEXT_M="Indicador ret." SCRTEXT_L="Indicador de retención" DOMNAME3L="WT_WITHCD" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="WT_QSSHB" DDLANGUAGE="S" POSITION="0037" ROLLNAME="WT_BS1" ADMINFIELD="0" INTTYPE="P" INTLEN="000008" REFTABLE="ZFIS_SIMPLE_ACCPOST" REFFIELD="WAERS" DOMNAME="WERTV8" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="22" DTELMASTER="D" DATATYPE="CURR" LENG="000015" OUTPUTLEN="000021" DECIMALS="000002" SIGNFLAG="X" MASK="  CURRE" MASKLEN="0000" DDTEXT="Base imponible de retención en moneda de documento" REPTEXT="Base imponible ret." SCRTEXT_S="BaseImpRet" SCRTEXT_M="Base imponib.ME" SCRTEXT_L="Base imponible ret.MD" DOMNAME3L="WERTV8" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="WT_QBSHB" DDLANGUAGE="S" POSITION="0038" ROLLNAME="WT_WT1" ADMINFIELD="0" INTTYPE="P" INTLEN="000008" REFTABLE="ZFIS_SIMPLE_ACCPOST" REFFIELD="WAERS" DOMNAME="WERTV8" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="23" DTELMASTER="D" DATATYPE="CURR" LENG="000015" OUTPUTLEN="000021" DECIMALS="000002" SIGNFLAG="X" MASK="  CURRE" MASKLEN="0000" DDTEXT="Importe de retención en moneda de documento" REPTEXT="ImpRetImp" SCRTEXT_S="ImpRetImp" SCRTEXT_M="Importe ret.ME" SCRTEXT_L="Importe de retenc.en MD" DOMNAME3L="WERTV8" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="VBUND" DDLANGUAGE="S" POSITION="0039" ROLLNAME="RASSC" ADMINFIELD="0" INTTYPE="C" INTLEN="000012" DOMNAME="RCOMP" ROUTPUTLEN="000000" MEMORYID="PGS" LOGFLAG="X" HEADLEN="06" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000006" OUTPUTLEN="000006" DECIMALS="000000" ENTITYTAB="T880" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de sociedad GL asociada" REPTEXT="SocGLA" SCRTEXT_S="SocGLAsoc." SCRTEXT_M="Soc.GL asociada" SCRTEXT_L="Sociedad GL asociada" DOMNAME3L="RCOMP" DEPTH="00" COMPTYPE="E" DEFFDNAME="TRADE_ID" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="NAME" DDLANGUAGE="S" POSITION="0040" ROLLNAME="NAME1_GP" ADMINFIELD="0" INTTYPE="C" INTLEN="000070" DOMNAME="NAME" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="35" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000035" OUTPUTLEN="000035" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Nombre 1" REPTEXT="Nombre 1" SCRTEXT_S="Nombre" SCRTEXT_M="Nombre" SCRTEXT_L="Nombre" DOMNAME3L="NAME" DEPTH="00" COMPTYPE="E" DEFFDNAME="NAME" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="POSTL_CODE" DDLANGUAGE="S" POSITION="0041" ROLLNAME="PSTLZ" ADMINFIELD="0" INTTYPE="C" INTLEN="000020" DOMNAME="PSTLZ" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="14" SCRLEN3="14" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Código postal" REPTEXT="CP" SCRTEXT_S="CP" SCRTEXT_M="Código postal" SCRTEXT_L="Código postal" DOMNAME3L="PSTLZ" DEPTH="00" COMPTYPE="E" DEFFDNAME="POSTL_CODE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="COUNTRY_ISO" DDLANGUAGE="S" POSITION="0042" ROLLNAME="LAND1_ISO" ADMINFIELD="0" INTTYPE="C" INTLEN="000004" DOMNAME="INTCA" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="03" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de país en código ISO" REPTEXT="CPI" SCRTEXT_S="País ISO" SCRTEXT_M="País ISO" SCRTEXT_L="País ISO" DOMNAME3L="INTCA" DEPTH="00" COMPTYPE="E" DEFFDNAME="COUNTRY_ISO" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="CITY" DDLANGUAGE="S" POSITION="0043" ROLLNAME="ORT01_GP" ADMINFIELD="0" INTTYPE="C" INTLEN="000070" DOMNAME="TEXT35" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="35" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000035" OUTPUTLEN="000035" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Población" REPTEXT="Población" SCRTEXT_S="Población" SCRTEXT_M="Población" SCRTEXT_L="Población" DOMNAME3L="TEXT35" DEPTH="00" COMPTYPE="E" DEFFDNAME="CITY" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="STREET" DDLANGUAGE="S" POSITION="0044" ROLLNAME="STRAS_GP" ADMINFIELD="0" INTTYPE="C" INTLEN="000070" DOMNAME="TEXT35" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="35" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000035" OUTPUTLEN="000035" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Calle y nº" REPTEXT="Calle" SCRTEXT_S="Calle" SCRTEXT_M="Calle" SCRTEXT_L="Calle" DOMNAME3L="TEXT35" DEPTH="00" COMPTYPE="E" DEFFDNAME="STREET" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="TAX_NO_1" DDLANGUAGE="S" POSITION="0045" ROLLNAME="STCD1" ADMINFIELD="0" INTTYPE="C" INTLEN="000032" DOMNAME="STCD1" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000016" OUTPUTLEN="000016" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de identificación fiscal 1" REPTEXT="Nº ident.fis.1" SCRTEXT_S="N.I.F.1" SCRTEXT_M="Nº ident.fis.1" SCRTEXT_L="Nº ident.fis.1" DOMNAME3L="STCD1" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_NO_1" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="TAX_NO_2" DDLANGUAGE="S" POSITION="0046" ROLLNAME="STCD2" ADMINFIELD="0" INTTYPE="C" INTLEN="000022" DOMNAME="STCD2" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000011" OUTPUTLEN="000011" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de identificación fiscal suplementario" REPTEXT="Nº ident.fis.2" SCRTEXT_S="N.I.F. 2" SCRTEXT_M="Nº ident.fis.2" SCRTEXT_L="Nº ident.fis.2" DOMNAME3L="STCD2" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_NO_2" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="TAX_NO_3" DDLANGUAGE="S" POSITION="0047" ROLLNAME="STCD3" ADMINFIELD="0" INTTYPE="C" INTLEN="000036" DOMNAME="CHAR18" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000018" OUTPUTLEN="000018" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número identificación fiscal 3" REPTEXT="NIF 3" SCRTEXT_S="NIF 3" SCRTEXT_M="NIF 3" SCRTEXT_L="NIF 3" DOMNAME3L="CHAR18" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_NO_3" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZFIS_SIMPLE_ACCPOST" FIELDNAME="TAX_NO_4" DDLANGUAGE="S" POSITION="0048" ROLLNAME="STCD4" ADMINFIELD="0" INTTYPE="C" INTLEN="000036" DOMNAME="CHAR18" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000018" OUTPUTLEN="000018" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número identificación fiscal 4" REPTEXT="NIF 4" SCRTEXT_S="NIF 4" SCRTEXT_M="NIF 4" SCRTEXT_L="NIF 4" DOMNAME3L="CHAR18" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_NO_4" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+ </TABL>
+ <TABL TABNAME="ZSIMPLE_ACC_POST" DDLANGUAGE="S" TABCLASS="TRANSP" DATMIN="0000000000" DATMAX="0000000000" DATAVG="0000000000" CLIDEP="X" LANGDEP="X" DDTEXT="Store posting with ZCL_SIMPLE_ACC_POST" AUTHCLASS="00" CONTFLAG="A" PROZPUFF="000" EXCLASS="3">
+  <dd09l TABNAME="ZSIMPLE_ACC_POST" AS4LOCAL="A" AS4VERS="0000" TABKAT="2" TABART="APPL1" SCHFELDANZ="000" BUFALLOW="N"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="MANDT" DDLANGUAGE="S" POSITION="0001" KEYFLAG="X" ROLLNAME="MANDT" ADMINFIELD="0" INTTYPE="C" INTLEN="000006" NOTNULL="X" DOMNAME="MANDT" ROUTPUTLEN="000000" HEADLEN="03" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CLNT" LENG="000003" OUTPUTLEN="000003" DECIMALS="000000" ENTITYTAB="T000" MASK="  CLNTE" MASKLEN="0000" DDTEXT="Mandante" REPTEXT="Md." SCRTEXT_S="Mandante" SCRTEXT_M="Mandante" SCRTEXT_L="Mandante" DOMNAME3L="MANDT" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="ID" DDLANGUAGE="S" POSITION="0002" KEYFLAG="X" ADMINFIELD="0" INTTYPE="N" INTLEN="000020" NOTNULL="X" ROUTPUTLEN="000000" HEADLEN="00" SCRLEN1="00" SCRLEN2="00" SCRLEN3="00" DATATYPE="NUMC" LENG="000010" OUTPUTLEN="000000" DECIMALS="000000" MASK="  NUMC" MASKLEN="0000" DDTEXT="Execution ID" DEPTH="00" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="NO_ITEM" DDLANGUAGE="S" POSITION="0003" KEYFLAG="X" ADMINFIELD="0" INTTYPE="N" INTLEN="000020" NOTNULL="X" ROUTPUTLEN="000000" HEADLEN="00" SCRLEN1="00" SCRLEN2="00" SCRLEN3="00" DATATYPE="NUMC" LENG="000010" OUTPUTLEN="000000" DECIMALS="000000" MASK="  NUMC" MASKLEN="0000" DDTEXT="Item Number" DEPTH="00" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME=".INCLUDE" POSITION="0004" ADMINFIELD="0" INTLEN="000000" PRECFIELD="ZFIS_SIMPLE_ACCPOST" ROUTPUTLEN="000000" HEADLEN="00" SCRLEN1="00" SCRLEN2="00" SCRLEN3="00" LENG="000000" OUTPUTLEN="000000" DECIMALS="000000" MASK="      S" MASKLEN="0000" DEPTH="00" COMPTYPE="S" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="ID_ACCDOC" POSITION="0005" ADMINFIELD="1" INTTYPE="C" INTLEN="000510" ROUTPUTLEN="000000" HEADLEN="00" SCRLEN1="00" SCRLEN2="00" SCRLEN3="00" DATATYPE="CHAR" LENG="000255" OUTPUTLEN="000000" DECIMALS="000000" MASK="  CHAR" MASKLEN="0000" DEPTH="00" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="AWTYP" DDLANGUAGE="S" POSITION="0006" ROLLNAME="AWTYP" ADMINFIELD="1" INTTYPE="C" INTLEN="000010" DOMNAME="AWTYP" ROUTPUTLEN="000000" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000005" OUTPUTLEN="000005" DECIMALS="000000" ENTITYTAB="TTYP" MASK="  CHARE" MASKLEN="0000" DDTEXT="Operación de referencia" REPTEXT="Oper.ref." SCRTEXT_S="Oper.ref." SCRTEXT_M="Op.referencia" SCRTEXT_L="Operación referencia" DOMNAME3L="AWTYP" DEPTH="00" COMPTYPE="E" DEFFDNAME="OBJ_TYPE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="AWKEY" DDLANGUAGE="S" POSITION="0007" ROLLNAME="AWKEY" ADMINFIELD="1" INTTYPE="C" INTLEN="000040" DOMNAME="AWKEY" ROUTPUTLEN="000000" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="25" DTELMASTER="D" DATATYPE="CHAR" LENG="000020" OUTPUTLEN="000020" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de referencia" REPTEXT="Clave ref." SCRTEXT_S="Clave ref." SCRTEXT_M="Clv.referencia" SCRTEXT_L="Clave de referencia" DOMNAME3L="AWKEY" DEPTH="00" COMPTYPE="E" DEFFDNAME="OBJ_KEY" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="AWSYS" DDLANGUAGE="S" POSITION="0008" ROLLNAME="AWSYS" ADMINFIELD="1" INTTYPE="C" INTLEN="000020" DOMNAME="LOGSYS" ROUTPUTLEN="000000" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="TBDLS" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Sistema lógico documento de origen" REPTEXT="Sist.lóg." SCRTEXT_S="Sist.lóg." SCRTEXT_M="Sist.lógico" SCRTEXT_L="Sistema lógico orig." DOMMASTER="D" DOMNAME3L="LOGSYS" DEPTH="00" COMPTYPE="E" DEFFDNAME="OBJ_SYS" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="BUKRS" DDLANGUAGE="S" POSITION="0009" ROLLNAME="BUKRS" ADMINFIELD="1" INTTYPE="C" INTLEN="000008" DOMNAME="BUKRS" ROUTPUTLEN="000000" MEMORYID="BUK" LOGFLAG="X" HEADLEN="04" SCRLEN1="06" SCRLEN2="15" SCRLEN3="15" DTELMASTER="D" DATATYPE="CHAR" LENG="000004" OUTPUTLEN="000004" DECIMALS="000000" ENTITYTAB="T001" MASK="  CHARE" MASKLEN="0000" DDTEXT="Sociedad" REPTEXT="Soc." SCRTEXT_S="Soc." SCRTEXT_M="Sociedad" SCRTEXT_L="Sociedad" DOMNAME3L="BUKRS" SHLPORIGIN="D" SHLPNAME="C_T001" SHLPFIELD="BUKRS" DEPTH="00" COMPTYPE="E" DEFFDNAME="COMP_CODE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="BLART" DDLANGUAGE="S" POSITION="0010" ROLLNAME="BLART" ADMINFIELD="1" INTTYPE="C" INTLEN="000004" DOMNAME="BLART" ROUTPUTLEN="000000" MEMORYID="BAR" LOGFLAG="X" HEADLEN="10" SCRLEN1="06" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" ENTITYTAB="T003" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clase de documento" REPTEXT="Clase doc." SCRTEXT_S="Clase" SCRTEXT_M="Clase documento" SCRTEXT_L="Clase de documento" DOMNAME3L="BLART" DEPTH="00" COMPTYPE="E" DEFFDNAME="DOC_TYPE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="BLDAT" DDLANGUAGE="S" POSITION="0011" ROLLNAME="BLDAT" ADMINFIELD="1" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha de documento en documento" REPTEXT="Fecha doc." SCRTEXT_S="Fecha doc." SCRTEXT_M="Fecha documento" SCRTEXT_L="Fecha de documento" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" DEFFDNAME="DOC_DATE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="BUDAT" DDLANGUAGE="S" POSITION="0012" ROLLNAME="BUDAT" ADMINFIELD="1" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha de contabilización en el documento" REPTEXT="Fe.contab." SCRTEXT_S="Fe.contab." SCRTEXT_M="Fecha contab." SCRTEXT_L="Fe.contabilización" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" DEFFDNAME="PSTNG_DATE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="MONAT" DDLANGUAGE="S" POSITION="0013" ROLLNAME="MONAT" ADMINFIELD="1" INTTYPE="N" INTLEN="000004" DOMNAME="MONAT" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="00" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="NUMC" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" MASK="  NUMCE" MASKLEN="0000" DDTEXT="Mes contable" SCRTEXT_S="Período" SCRTEXT_M="Período" SCRTEXT_L="Período contable" DOMNAME3L="MONAT" DEPTH="00" COMPTYPE="E" DEFFDNAME="FIS_PERIOD" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="VATDATE" DDLANGUAGE="S" POSITION="0014" ROLLNAME="VATDATE" ADMINFIELD="1" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha decl.impuesto" REPTEXT="FechaDecl" SCRTEXT_S="FechaDecl" SCRTEXT_M="FechDeclImpuest" SCRTEXT_L="Fecha decl.impuesto" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="WAERS" DDLANGUAGE="S" POSITION="0015" ROLLNAME="WAERS" ADMINFIELD="1" INTTYPE="C" INTLEN="000010" DOMNAME="WAERS" ROUTPUTLEN="000000" MEMORYID="FWS" LOGFLAG="X" HEADLEN="05" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CUKY" LENG="000005" OUTPUTLEN="000005" DECIMALS="000000" ENTITYTAB="TCURC" MASK="  CUKYE" MASKLEN="0000" DDTEXT="Clave de moneda" REPTEXT="Mon." SCRTEXT_S="Moneda" SCRTEXT_M="Moneda" SCRTEXT_L="Moneda" DOMNAME3L="WAERS" DEPTH="00" COMPTYPE="E" DEFFDNAME="CURRENCY" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="XBLNR" DDLANGUAGE="S" POSITION="0016" ROLLNAME="XBLNR" ADMINFIELD="1" INTTYPE="C" INTLEN="000032" DOMNAME="XBLNR" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="16" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000016" OUTPUTLEN="000016" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de documento de referencia" REPTEXT="Referencia" SCRTEXT_S="Referencia" SCRTEXT_M="Referencia" SCRTEXT_L="Referencia" DOMNAME3L="XBLNR" DEPTH="00" COMPTYPE="E" DEFFDNAME="REF_DOC_NO" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="BKTXT" DDLANGUAGE="S" POSITION="0017" ROLLNAME="BKTXT" ADMINFIELD="1" INTTYPE="C" INTLEN="000050" DOMNAME="TEXT25" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="25" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000025" OUTPUTLEN="000025" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Texto de cabecera de documento" REPTEXT="Texto cab.documento" SCRTEXT_S="Txt.cabec." SCRTEXT_M="Txt.cab.doc." SCRTEXT_L="Texto cab.documento" DOMNAME3L="TEXT25" DEPTH="00" COMPTYPE="E" DEFFDNAME="HEADER_TXT" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="KUNNR" DDLANGUAGE="S" POSITION="0018" ROLLNAME="KUNNR" ADMINFIELD="1" INTTYPE="C" INTLEN="000020" DOMNAME="KUNNR" ROUTPUTLEN="000000" MEMORYID="KUN" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="KNA1" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de deudor" REPTEXT="Cliente" SCRTEXT_S="Cliente" SCRTEXT_M="Cliente" SCRTEXT_L="Cliente" DOMNAME3L="KUNNR" SHLPORIGIN="D" SHLPNAME="C_KUNNR" SHLPFIELD="KUNNR" DEPTH="00" COMPTYPE="E" DEFFDNAME="CUSTOMER" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="LIFNR" DDLANGUAGE="S" POSITION="0019" ROLLNAME="LIFNR" ADMINFIELD="1" INTTYPE="C" INTLEN="000020" DOMNAME="LIFNR" ROUTPUTLEN="000000" MEMORYID="LIF" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="LFA1" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de cuenta del proveedor o acreedor" REPTEXT="Acreedor" SCRTEXT_S="Acreedor" SCRTEXT_M="Acreedor" SCRTEXT_L="Acreedor" DOMNAME3L="LIFNR" SHLPORIGIN="D" SHLPNAME="KRED_C" SHLPFIELD="LIFNR" DEPTH="00" COMPTYPE="E" DEFFDNAME="VENDOR_NO" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="UMSKS" DDLANGUAGE="S" POSITION="0020" ROLLNAME="UMSKS" ADMINFIELD="1" INTTYPE="C" INTLEN="000002" DOMNAME="UMSKS" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="11" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000001" OUTPUTLEN="000001" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clase de operación en cuenta de mayor especial" REPTEXT="Cl.oper." SCRTEXT_S="Oper.CME" SCRTEXT_M="Cl.oper.CME" SCRTEXT_L="Clase operación CME" DOMNAME3L="UMSKS" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="HKONT" DDLANGUAGE="S" POSITION="0021" ROLLNAME="HKONT" ADMINFIELD="1" INTTYPE="C" INTLEN="000020" DOMNAME="SAKNR" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="07" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="SKA1" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Cuenta de mayor de la contabilidad principal" REPTEXT="Lib.mayor" SCRTEXT_S="LibrMay" SCRTEXT_M="Libro mayor" SCRTEXT_L="Cuenta de mayor" DOMNAME3L="SAKNR" DEPTH="00" COMPTYPE="E" DEFFDNAME="GL_ACCOUNT" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="WRBTR" DDLANGUAGE="S" POSITION="0022" ROLLNAME="BAPIDOCCUR" ADMINFIELD="1" INTTYPE="P" INTLEN="000012" DOMNAME="BAPICURR1" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DEC" LENG="000023" OUTPUTLEN="000031" DECIMALS="000004" SIGNFLAG="X" MASK="  DEC E" MASKLEN="0000" DDTEXT="Importe en moneda de documento" REPTEXT="Importe" SCRTEXT_S="Importe" SCRTEXT_M="Importe" SCRTEXT_L="Importe" DOMMASTER="D" DOMNAME3L="BAPICURR1" DEPTH="00" COMPTYPE="E" DEFFDNAME="AMT_DOCCUR" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="VALUT" DDLANGUAGE="S" POSITION="0023" ROLLNAME="VALUT" ADMINFIELD="1" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha valor" REPTEXT="Fe.valor" SCRTEXT_S="Fe.valor" SCRTEXT_M="Fecha valor" SCRTEXT_L="Fecha valor" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" DEFFDNAME="VALUE_DATE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="SGTXT" DDLANGUAGE="S" POSITION="0024" ROLLNAME="SGTXT" ADMINFIELD="1" INTTYPE="C" INTLEN="000100" DOMNAME="TEXT50" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="50" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000050" OUTPUTLEN="000050" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Texto posición" REPTEXT="Texto" SCRTEXT_S="Texto" SCRTEXT_M="Texto" SCRTEXT_L="Texto" DOMNAME3L="TEXT50" DEPTH="00" COMPTYPE="E" DEFFDNAME="ITEM_TEXT" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="ZUONR" DDLANGUAGE="S" POSITION="0025" ROLLNAME="DZUONR" ADMINFIELD="1" INTTYPE="C" INTLEN="000036" DOMNAME="ZUONR" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="18" SCRLEN1="10" SCRLEN2="12" SCRLEN3="15" DTELMASTER="D" DATATYPE="CHAR" LENG="000018" OUTPUTLEN="000018" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de asignación" REPTEXT="Asignación" SCRTEXT_S="Asign." SCRTEXT_M="Asignación" SCRTEXT_L="Asignación" DOMNAME3L="ZUONR" DEPTH="00" COMPTYPE="E" DEFFDNAME="ALLOC_NMBR" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="MWSKZ" DDLANGUAGE="S" POSITION="0026" ROLLNAME="MWSKZ" ADMINFIELD="1" INTTYPE="C" INTLEN="000004" DOMNAME="MWSKZ" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="02" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" ENTITYTAB="T007A" MASK="  CHARE" MASKLEN="0000" DDTEXT="Indicador IVA" REPTEXT="II" SCRTEXT_S="Ind.imp." SCRTEXT_M="Ind.impuestos" SCRTEXT_L="Indicador impuestos" DOMNAME3L="MWSKZ" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_CODE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="KOSTL" DDLANGUAGE="S" POSITION="0027" ROLLNAME="KOSTL" ADMINFIELD="1" INTTYPE="C" INTLEN="000020" DOMNAME="KOSTL" ROUTPUTLEN="000000" MEMORYID="KOS" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" ENTITYTAB="CSKS" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Centro de coste" REPTEXT="Ce.coste" SCRTEXT_S="Ce.coste" SCRTEXT_M="Centro coste" SCRTEXT_L="Centro de coste" DOMNAME3L="KOSTL" DEPTH="00" COMPTYPE="E" DEFFDNAME="COSTCENTER" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="POSID" DDLANGUAGE="S" POSITION="0028" ROLLNAME="PS_POSID" ADMINFIELD="1" INTTYPE="C" INTLEN="000048" DOMNAME="PS_POSID" ROUTPUTLEN="000000" MEMORYID="PRO" LOGFLAG="X" HEADLEN="24" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000024" OUTPUTLEN="000024" DECIMALS="000000" CONVEXIT="ABPSN" MASK="  CHARE" MASKLEN="0000" DDTEXT="Elemento del plan de estructura de proyecto (elemento PEP)" REPTEXT="Elemento PEP" SCRTEXT_S="Elem.PEP" SCRTEXT_M="Elemento PEP" SCRTEXT_L="Elemento PEP" DOMNAME3L="PS_POSID" DEPTH="00" COMPTYPE="E" DEFFDNAME="WBS_ELEMENT" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="XREF1" DDLANGUAGE="S" POSITION="0029" ROLLNAME="XREF1" ADMINFIELD="1" INTTYPE="C" INTLEN="000024" DOMNAME="CHAR12" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="12" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000012" OUTPUTLEN="000012" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de referencia de interlocutor comercial" REPTEXT="Clv.ref.1" SCRTEXT_S="Clv.ref.1" SCRTEXT_M="Clave ref.1" SCRTEXT_L="Clave referencia 1" DOMNAME3L="CHAR12" DEPTH="00" COMPTYPE="E" DEFFDNAME="REF_KEY_1" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="XREF2" DDLANGUAGE="S" POSITION="0030" ROLLNAME="XREF2" ADMINFIELD="1" INTTYPE="C" INTLEN="000024" DOMNAME="CHAR12" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="12" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000012" OUTPUTLEN="000012" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de referencia de interlocutor comercial" REPTEXT="Clv.ref.2" SCRTEXT_S="Clv.ref.2" SCRTEXT_M="Clave ref.2" SCRTEXT_L="Clave referencia 2" DOMNAME3L="CHAR12" DEPTH="00" COMPTYPE="E" DEFFDNAME="REF_KEY_2" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="XREF3" DDLANGUAGE="S" POSITION="0031" ROLLNAME="XREF3" ADMINFIELD="1" INTTYPE="C" INTLEN="000040" DOMNAME="CHAR20" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="12" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000020" OUTPUTLEN="000020" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de referencia para la posición de documento" REPTEXT="Clv.ref.3" SCRTEXT_S="Clv.ref.3" SCRTEXT_M="Clave ref. 3" SCRTEXT_L="Clave referencia 3" DOMNAME3L="CHAR20" DEPTH="00" COMPTYPE="E" DEFFDNAME="REF_KEY_3" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="ZTERM" DDLANGUAGE="S" POSITION="0032" ROLLNAME="ACPI_ZTERM" ADMINFIELD="1" INTTYPE="C" INTLEN="000008" DOMNAME="CHAR4" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="04" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000004" OUTPUTLEN="000004" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de condiciones de pago" REPTEXT="CPag" SCRTEXT_S="Cond.pago" SCRTEXT_M="Condic.pago" SCRTEXT_L="Condiciones de pago" DOMNAME3L="CHAR4" DEPTH="00" COMPTYPE="E" DEFFDNAME="PMNTTRMS" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="ZFBDT" DDLANGUAGE="S" POSITION="0033" ROLLNAME="ACPI_ZFBDT" ADMINFIELD="1" INTTYPE="D" INTLEN="000016" DOMNAME="DATUM" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DATS" LENG="000008" OUTPUTLEN="000010" DECIMALS="000000" MASK="  DATSE" MASKLEN="0000" DDTEXT="Fecha base para el cálculo del vencimiento" REPTEXT="Fe.base" SCRTEXT_S="Fe.base" SCRTEXT_M="Fecha base" SCRTEXT_L="Fe.base p.plazo pago" DOMNAME3L="DATUM" SHLPORIGIN="T" DEPTH="00" COMPTYPE="E" DEFFDNAME="BLINE_DATE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="ZBD1T" DDLANGUAGE="S" POSITION="0034" ROLLNAME="ACPI_ZBD1T" ADMINFIELD="1" INTTYPE="P" INTLEN="000002" DOMNAME="ZBDXT" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="04" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="DEC" LENG="000003" OUTPUTLEN="000003" DECIMALS="000000" MASK="  DEC E" MASKLEN="0000" DDTEXT="Días del descuento por pronto pago 1" REPTEXT="Día1" SCRTEXT_S="Días" SCRTEXT_M="Días" SCRTEXT_L="Días" DOMNAME3L="ZBDXT" DEPTH="00" COMPTYPE="E" DEFFDNAME="DSCT_DAYS1" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="ZLSCH" DDLANGUAGE="S" POSITION="0035" ROLLNAME="ACPI_ZLSCH" ADMINFIELD="1" INTTYPE="C" INTLEN="000002" DOMNAME="ZLSCH" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="02" SCRLEN1="10" SCRLEN2="12" SCRLEN3="15" DTELMASTER="D" DATATYPE="CHAR" LENG="000001" OUTPUTLEN="000001" DECIMALS="000000" ENTITYTAB="T042Z" MASK="  CHARE" MASKLEN="0000" DDTEXT="Vía de pago" REPTEXT="VP" SCRTEXT_S="Vía pago" SCRTEXT_M="Vía de pago" SCRTEXT_L="Vía de pago" DOMNAME3L="ZLSCH" DEPTH="00" COMPTYPE="E" DEFFDNAME="PYMT_METH" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="ZLSPR" DDLANGUAGE="S" POSITION="0036" ROLLNAME="ACPI_ZLSPR" ADMINFIELD="1" INTTYPE="C" INTLEN="000002" DOMNAME="CHAR1" ROUTPUTLEN="000000" MEMORYID="SPE" LOGFLAG="X" HEADLEN="03" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000001" OUTPUTLEN="000001" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave para bloqueo de pago" REPTEXT="BP" SCRTEXT_S="Bloq.pago" SCRTEXT_M="Bloqueo pago" SCRTEXT_L="Bloqueo de pagos" DOMNAME3L="CHAR1" DEPTH="00" COMPTYPE="E" DEFFDNAME="PMNT_BLOCK" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="HBKID" DDLANGUAGE="S" POSITION="0037" ROLLNAME="HBKID" ADMINFIELD="1" INTTYPE="C" INTLEN="000010" DOMNAME="HBKID" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="08" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000005" OUTPUTLEN="000005" DECIMALS="000000" ENTITYTAB="T012" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave breve para banco propio" REPTEXT="Bco.prp." SCRTEXT_S="Bco.prop." SCRTEXT_M="Banco propio" SCRTEXT_L="Banco propio" DOMNAME3L="HBKID" DEPTH="00" COMPTYPE="E" DEFFDNAME="HOUSEBANKID" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="HKTID" DDLANGUAGE="S" POSITION="0038" ROLLNAME="HKTID" ADMINFIELD="1" INTTYPE="C" INTLEN="000010" DOMNAME="HKTID" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="09" SCRLEN1="10" SCRLEN2="15" SCRLEN3="25" DTELMASTER="D" DATATYPE="CHAR" LENG="000005" OUTPUTLEN="000005" DECIMALS="000000" ENTITYTAB="T012K" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave breve para un banco/cuenta" REPTEXT="ID.cta." SCRTEXT_S="ID.cta." SCRTEXT_M="ID.cuenta" SCRTEXT_L="ID de cuenta" DOMNAME3L="HKTID" DEPTH="00" COMPTYPE="E" DEFFDNAME="HOUSEBANKACCTID" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="WITHT" DDLANGUAGE="S" POSITION="0039" ROLLNAME="WITHT" ADMINFIELD="1" INTTYPE="C" INTLEN="000004" DOMNAME="WITHT" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="16" SCRLEN1="10" SCRLEN2="16" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" ENTITYTAB="T059P" MASK="  CHARE" MASKLEN="0000" DDTEXT="Indicador para tipo de retenciones" REPTEXT="Tipo retenciones" SCRTEXT_S="Tp.retenc." SCRTEXT_M="Tipo retenciones" SCRTEXT_L="Tipo de retenciones" DOMMASTER="D" DOMNAME3L="WITHT" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="WT_WITHCD" DDLANGUAGE="S" POSITION="0040" ROLLNAME="WT_WITHCD" ADMINFIELD="1" INTTYPE="C" INTLEN="000004" DOMNAME="WT_WITHCD" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="03" SCRLEN1="10" SCRLEN2="16" SCRLEN3="24" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" ENTITYTAB="T059Z" MASK="  CHARE" MASKLEN="0000" DDTEXT="Indicador de retención" REPTEXT="Ret" SCRTEXT_S="Ind.ret." SCRTEXT_M="Indicador ret." SCRTEXT_L="Indicador de retención" DOMNAME3L="WT_WITHCD" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="WT_QSSHB" DDLANGUAGE="S" POSITION="0041" ROLLNAME="WT_BS1" ADMINFIELD="1" INTTYPE="P" INTLEN="000008" REFTABLE="ZSIMPLE_ACC_POST" REFFIELD="WAERS" DOMNAME="WERTV8" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="22" DTELMASTER="D" DATATYPE="CURR" LENG="000015" OUTPUTLEN="000021" DECIMALS="000002" SIGNFLAG="X" MASK="  CURRE" MASKLEN="0000" DDTEXT="Base imponible de retención en moneda de documento" REPTEXT="Base imponible ret." SCRTEXT_S="BaseImpRet" SCRTEXT_M="Base imponib.ME" SCRTEXT_L="Base imponible ret.MD" DOMNAME3L="WERTV8" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="WT_QBSHB" DDLANGUAGE="S" POSITION="0042" ROLLNAME="WT_WT1" ADMINFIELD="1" INTTYPE="P" INTLEN="000008" REFTABLE="ZSIMPLE_ACC_POST" REFFIELD="WAERS" DOMNAME="WERTV8" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="23" DTELMASTER="D" DATATYPE="CURR" LENG="000015" OUTPUTLEN="000021" DECIMALS="000002" SIGNFLAG="X" MASK="  CURRE" MASKLEN="0000" DDTEXT="Importe de retención en moneda de documento" REPTEXT="ImpRetImp" SCRTEXT_S="ImpRetImp" SCRTEXT_M="Importe ret.ME" SCRTEXT_L="Importe de retenc.en MD" DOMNAME3L="WERTV8" DEPTH="00" COMPTYPE="E" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="VBUND" DDLANGUAGE="S" POSITION="0043" ROLLNAME="RASSC" ADMINFIELD="1" INTTYPE="C" INTLEN="000012" DOMNAME="RCOMP" ROUTPUTLEN="000000" MEMORYID="PGS" LOGFLAG="X" HEADLEN="06" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000006" OUTPUTLEN="000006" DECIMALS="000000" ENTITYTAB="T880" CONVEXIT="ALPHA" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de sociedad GL asociada" REPTEXT="SocGLA" SCRTEXT_S="SocGLAsoc." SCRTEXT_M="Soc.GL asociada" SCRTEXT_L="Sociedad GL asociada" DOMNAME3L="RCOMP" DEPTH="00" COMPTYPE="E" DEFFDNAME="TRADE_ID" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="NAME" DDLANGUAGE="S" POSITION="0044" ROLLNAME="NAME1_GP" ADMINFIELD="1" INTTYPE="C" INTLEN="000070" DOMNAME="NAME" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="35" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000035" OUTPUTLEN="000035" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Nombre 1" REPTEXT="Nombre 1" SCRTEXT_S="Nombre" SCRTEXT_M="Nombre" SCRTEXT_L="Nombre" DOMNAME3L="NAME" DEPTH="00" COMPTYPE="E" DEFFDNAME="NAME" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="POSTL_CODE" DDLANGUAGE="S" POSITION="0045" ROLLNAME="PSTLZ" ADMINFIELD="1" INTTYPE="C" INTLEN="000020" DOMNAME="PSTLZ" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="10" SCRLEN1="10" SCRLEN2="14" SCRLEN3="14" DTELMASTER="D" DATATYPE="CHAR" LENG="000010" OUTPUTLEN="000010" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Código postal" REPTEXT="CP" SCRTEXT_S="CP" SCRTEXT_M="Código postal" SCRTEXT_L="Código postal" DOMNAME3L="PSTLZ" DEPTH="00" COMPTYPE="E" DEFFDNAME="POSTL_CODE" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="COUNTRY_ISO" DDLANGUAGE="S" POSITION="0046" ROLLNAME="LAND1_ISO" ADMINFIELD="1" INTTYPE="C" INTLEN="000004" DOMNAME="INTCA" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="03" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000002" OUTPUTLEN="000002" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Clave de país en código ISO" REPTEXT="CPI" SCRTEXT_S="País ISO" SCRTEXT_M="País ISO" SCRTEXT_L="País ISO" DOMNAME3L="INTCA" DEPTH="00" COMPTYPE="E" DEFFDNAME="COUNTRY_ISO" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="CITY" DDLANGUAGE="S" POSITION="0047" ROLLNAME="ORT01_GP" ADMINFIELD="1" INTTYPE="C" INTLEN="000070" DOMNAME="TEXT35" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="35" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000035" OUTPUTLEN="000035" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Población" REPTEXT="Población" SCRTEXT_S="Población" SCRTEXT_M="Población" SCRTEXT_L="Población" DOMNAME3L="TEXT35" DEPTH="00" COMPTYPE="E" DEFFDNAME="CITY" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="STREET" DDLANGUAGE="S" POSITION="0048" ROLLNAME="STRAS_GP" ADMINFIELD="1" INTTYPE="C" INTLEN="000070" DOMNAME="TEXT35" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="35" SCRLEN1="10" SCRLEN2="12" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000035" OUTPUTLEN="000035" DECIMALS="000000" LOWERCASE="X" MASK="  CHARE" MASKLEN="0000" DDTEXT="Calle y nº" REPTEXT="Calle" SCRTEXT_S="Calle" SCRTEXT_M="Calle" SCRTEXT_L="Calle" DOMNAME3L="TEXT35" DEPTH="00" COMPTYPE="E" DEFFDNAME="STREET" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="TAX_NO_1" DDLANGUAGE="S" POSITION="0049" ROLLNAME="STCD1" ADMINFIELD="1" INTTYPE="C" INTLEN="000032" DOMNAME="STCD1" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000016" OUTPUTLEN="000016" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de identificación fiscal 1" REPTEXT="Nº ident.fis.1" SCRTEXT_S="N.I.F.1" SCRTEXT_M="Nº ident.fis.1" SCRTEXT_L="Nº ident.fis.1" DOMNAME3L="STCD1" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_NO_1" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="TAX_NO_2" DDLANGUAGE="S" POSITION="0050" ROLLNAME="STCD2" ADMINFIELD="1" INTTYPE="C" INTLEN="000022" DOMNAME="STCD2" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000011" OUTPUTLEN="000011" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número de identificación fiscal suplementario" REPTEXT="Nº ident.fis.2" SCRTEXT_S="N.I.F. 2" SCRTEXT_M="Nº ident.fis.2" SCRTEXT_L="Nº ident.fis.2" DOMNAME3L="STCD2" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_NO_2" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="TAX_NO_3" DDLANGUAGE="S" POSITION="0051" ROLLNAME="STCD3" ADMINFIELD="1" INTTYPE="C" INTLEN="000036" DOMNAME="CHAR18" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000018" OUTPUTLEN="000018" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número identificación fiscal 3" REPTEXT="NIF 3" SCRTEXT_S="NIF 3" SCRTEXT_M="NIF 3" SCRTEXT_L="NIF 3" DOMNAME3L="CHAR18" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_NO_3" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+  <dd03p TABNAME="ZSIMPLE_ACC_POST" FIELDNAME="TAX_NO_4" DDLANGUAGE="S" POSITION="0052" ROLLNAME="STCD4" ADMINFIELD="1" INTTYPE="C" INTLEN="000036" DOMNAME="CHAR18" ROUTPUTLEN="000000" LOGFLAG="X" HEADLEN="20" SCRLEN1="10" SCRLEN2="15" SCRLEN3="20" DTELMASTER="D" DATATYPE="CHAR" LENG="000018" OUTPUTLEN="000018" DECIMALS="000000" MASK="  CHARE" MASKLEN="0000" DDTEXT="Número identificación fiscal 4" REPTEXT="NIF 4" SCRTEXT_S="NIF 4" SCRTEXT_M="NIF 4" SCRTEXT_L="NIF 4" DOMNAME3L="CHAR18" DEPTH="00" COMPTYPE="E" DEFFDNAME="TAX_NO_4" EXCLASS="0" DBPOSITION="0000" OUTPUTSTYLE="00" STRORLOCPOS="00"/>
+ </TABL>
+</nugget>
