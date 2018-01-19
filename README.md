@@ -2,6 +2,6 @@
 Simplest way to make account posting
 
 
-From clipboard to SAP with a single click
+From Excel clipboard to SAP with a single click
 
 
