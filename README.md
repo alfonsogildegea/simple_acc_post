@@ -1,7 +1,6 @@
 # SIMPLE_ACC_POST
-Simplest way to make account posting
+Multiple SAP postings made using excel's clipboard
 
-
-From Excel clipboard to SAP with a single click
-
+This is a simple way to make business transaction with account posting, from excel with copy / paste method. 
+Copy multiple documents to clipboard from one single sheet and post them into SAP … with one single button !.
 
