@@ -11,4 +11,4 @@ Copy multiple documents to clipboard from one single sheet and post them into SA
 ![Multiple documents](/images/min_doc_multiple.gif)
 
 **Fields available**
-![Fields available](/images/fields.gif)
+![Fields available](/images/fields.jpg)
