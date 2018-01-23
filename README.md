@@ -43,7 +43,14 @@ ENDMETHOD.                    "BTN_CB_P_D
 ## Fields available
 ![Fields available](/images/fields.jpg)
 
-[Excel Template](/Template+ZCL_SIMPLE_ACC_POST.xlsx)
+[Excel Template](/Template_ZCL_SIMPLE_ACC_POST.xlsx)
+
+**Plain template**
+
+ID_ACCDOC|AWTYP|AWKEY|AWSYS|BUKRS|BLART|BLDAT|BUDAT|MONAT|VATDATE|WAERS|XBLNR|BKTXT|KUNNR|LIFNR|UMSKS|HKONT|WRBTR|VALUT|SGTXT|ZUONR|MWSKZ|KOSTL|POSID|XREF1|XREF2|XREF3|ZTERM|ZFBDT|ZBD1T|ZLSCH|ZLSPR|HBKID|HKTID|WITHT|WT_WITHCD|WT_QSSHB|WT_QBSHB|VBUND|NAME|POSTL_CODE|COUNTRY_ISO|CITY|STREET|TAX_NO_1|TAX_NO_2|TAX_NO_3|TAX_NO_4
+---------|-----|-----|-----|-----|-----|-----|-----|-----|-------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|---------|--------|--------|-----|----|----------|-----------|----|------|--------|--------|--------|--------
+Financial Document ID. Group items into an Acc. Document|Reference Transaction|Reference Key|Logical system of source document|Company Code|Document Type|Document Date in Document|Posting Date in the Document|Fiscal Period|Tax Reporting Date|Currency Key|Reference Document Number|Document Header Text|Customer Number|Account Number of Vendor or Creditor|Special G/L Transaction Type|General Ledger Account|Amount in Document Currency|Value Date|Item Text|Assignment Number|Tax on sales/purchases code|Cost Center|Work Breakdown Structure Element (WBS Element)|Business Partner Reference Key|Business Partner Reference Key|Reference Key for Line Item|Terms of Payment Key|Baseline Date For Due Date Calculation|Days for first cash discount|Payment method|Payment block key|Short Key for a House Bank|ID for Account Details|Indicator for withholding tax type|Withholding tax code|Withholding tax base amount in document currency|Withholding tax amount in document currency|Company ID of Trading Partner|Name 1|Postal Code|Country key in ISO code|City|House number and street|Tax Number 1|Tax Number 2|Tax Number 3|Tax Number 4
+CHAR 255|CHAR 5|CHAR 20|CHAR 10|CHAR 4|CHAR 2|DATS 8|DATS 8|CHAR 2|DATS 8|CUKY 5|CHAR 16|CHAR 25|CHAR 10|CHAR 10|CHAR 1|CHAR 10|DEC  23  4|DATS 8|CHAR 50|CHAR 18|CHAR 2|CHAR 10|CHAR 24|CHAR 12|CHAR 12|CHAR 20|CHAR 4|DATS 8|DEC  3|CHAR 1|CHAR 1|CHAR 5|CHAR 5|CHAR 2|CHAR 2|CURR 15  2|CURR 15  2|CHAR 6|CHAR 35|CHAR 10|CHAR 2|CHAR 35|CHAR 35|CHAR 16|CHAR 11|CHAR 18|CHAR 18
 
 
 ## Install
