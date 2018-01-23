@@ -6,7 +6,8 @@ Copy multiple documents to clipboard from one single sheet and post them into SA
 You can post debitor, creditor, GL, tax, withholdings tax, CPD customer... like FB50, FB60 or FB70
 
 <!-- MarkdownTOC SUBLIME 3 -->
-- [Show in action][show-in-action]
+[TOC levels=1-3]
+- [Show in action](#show-in-action)
 - [How it works][how-it-works]
 - [Fields available][fields-available]
 - [Install][install]
@@ -15,7 +16,7 @@ You can post debitor, creditor, GL, tax, withholdings tax, CPD customer... like 
 	- [ABAPGIT][abapgit]
 <!-- /MarkdownTOC -->
 
-## Show in action[show-in-action]
+## Show in action
 Samples of postings made with BAPI_ACC_DOCUMENT_POST from [SAP note 2083799](https://launchpad.support.sap.com/#/notes/2083799)
 
 #### Single Document[single-document]
