@@ -5,16 +5,26 @@ Copy multiple documents to clipboard from one single sheet and post them into SA
 
 You can post debitor, creditor, GL, tax, withholdings tax, CPD customer... like FB50, FB60 or FB70
 
-## Show in action
+<!-- MarkdownTOC SUBLIME 3 -->
+- [Show in action][show-in-action]
+- [How it works][how-it-works]
+- [Fields available][fields-available]
+- [Install][install]
+	- [Prerequisites][prerequisites]
+	- [SAPLinks][saplink]
+	- [ABAPGIT][abapgit]
+<!-- /MarkdownTOC -->
+
+## Show in action[show-in-action]
 Samples of postings made with BAPI_ACC_DOCUMENT_POST from [SAP note 2083799](https://launchpad.support.sap.com/#/notes/2083799)
 
-#### Single Document
+#### Single Document[single-document]
 ![Single document](/images/min_doc.gif)
 
-#### Multiple Debitor documents with tax
+#### Multiple Debitor documents with tax[multiple-debitor]
 ![Multiple documents](/images/tax_doc.gif)
 
-## How it works
+## How it works[how-it-works]
 ![Diagram](/images/Diagram.jpg)
 
 ```abap
@@ -32,21 +42,21 @@ METHOD BTN_CB_P_D.
 ENDMETHOD.                    "BTN_CB_P_D  
 ```
 
-## Fields available
+## Fields available[fields-available]
 ![Fields available](/images/fields.jpg)
 
-## Install
+## Install[install]
 
-### Prerequisites
+### Prerequisites[prerequisites]
 Only if you need bill of exchange postings. They are not supported by BAPI_ACC_DOCUMENT_POST (see note [2076117](https://launchpad.support.sap.com/#/notes/2076117)), and for me, the simplest way to do it's using a BDC with [ZCL_BC_BCD](https://github.com/EsperancaB/sap_project_object/tree/master/UTILITIES/ZCL_BC_BDC). 
 If you don't want install it, only have to do is remove (or comment) method ZCL_SIMPLE_ACC_POST->BDC_POST.
 
-### SAPLinks
+### SAPLinks[saplink]
 [SAPlink User Documentation](https://wiki.scn.sap.com/wiki/display/ABAP/SAPlink+User+Documentation)
 
 Import nugget file: [NUGG_Z_SIMPLE_ACC_POST.nugg](https://github.com/alfonsogildegea/simple_acc_post/blob/master/NUGG_Z_SIMPLE_ACC_POST.nugg)
 
-### ABAPGIT
+### ABAPGIT[abapgit]
 [http://www.abapgit.org](http://www.abapgit.org)
 
 Import package: [ABAPGIT_20180122.zip](https://github.com/alfonsogildegea/simple_acc_post/blob/master/ABAPGIT_20180122.zip)
