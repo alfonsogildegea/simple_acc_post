@@ -4,7 +4,7 @@ This is a simple way to make business transaction with account posting, from exc
 Copy multiple documents to clipboard from one single sheet and post them into SAP … with one single button !.
 
 ## Show in action
-Samples from [SAP note 2083799](https://launchpad.support.sap.com/#/notes/2083799)
+Samples of postings made with BAPI_ACC_DOCUMENT_POST from [SAP note 2083799](https://launchpad.support.sap.com/#/notes/2083799)
 
 #### Single Document
 ![Single document](/images/min_doc.gif)
