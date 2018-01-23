@@ -17,6 +17,21 @@ Samples of postings made with BAPI_ACC_DOCUMENT_POST from [SAP note 2083799](htt
 ## How it works
 ![Diagram](/images/Diagram.jpg)
 
+```abap
+METHOD BTN_CB_P_D.
+  DATA: LR_SIMPLE_ACC_POST TYPE REF TO ZCL_SIMPLE_ACC_POST.
+
+  CREATE OBJECT LR_SIMPLE_ACC_POST.
+  LR_SIMPLE_ACC_POST->POST(
+    EXPORTING
+      IV_CHECK          = ABAP_FALSE    
+      IV_CLIPBOARD_DATA = ABAP_TRUE     " Post clipboard data
+  ).
+  LR_SIMPLE_ACC_POST->DISPLAY_RESULT( ).
+  
+ENDMETHOD.                    "BTN_CB_P_D  
+```
+
 ## Fields available
 ![Fields available](/images/fields.jpg)
 
