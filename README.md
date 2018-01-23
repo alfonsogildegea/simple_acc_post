@@ -27,12 +27,12 @@ If you don't want install it, only have to do is remove (or comment) method ZCL_
 ### SAPLinks
 https://wiki.scn.sap.com/wiki/display/ABAP/SAPlink+User+Documentation
 
-Import nugget file: https://github.com/alfonsogildegea/simple_acc_post/blob/master/NUGG_Z_SIMPLE_ACC_POST.nugg
+Import nugget file: [NUGG_Z_SIMPLE_ACC_POST.nugg](https://github.com/alfonsogildegea/simple_acc_post/blob/master/NUGG_Z_SIMPLE_ACC_POST.nugg)
 
 ### ABAPGIT
 http://www.abapgit.org
 
-Import package: https://github.com/alfonsogildegea/simple_acc_post/blob/master/ABAPGIT_20180122.zip
+Import package: [ABAPGIT_20180122.zip](https://github.com/alfonsogildegea/simple_acc_post/blob/master/ABAPGIT_20180122.zip)
 
 
 
