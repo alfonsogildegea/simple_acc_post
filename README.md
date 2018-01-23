@@ -17,3 +17,24 @@ Samples of postings made with BAPI_ACC_DOCUMENT_POST from [SAP note 2083799](htt
 
 ## Fields available
 ![Fields available](/images/fields.jpg)
+
+## Install
+
+### Prerequisites
+Only if you need bill of exchange postings. They are not supported by BAPI_ACC_DOCUMENT_POST, and for me, the simplest way to do it's using a BDC with [ZCL_BC_BCD](https://github.com/EsperancaB/sap_project_object/tree/master/UTILITIES/ZCL_BC_BDC). 
+If you don't want install it, only have to do is remove (or comment) method ZCL_SIMPLE_ACC_POST->BDC_POST.
+
+### SAPLinks
+https://wiki.scn.sap.com/wiki/display/ABAP/SAPlink+User+Documentation
+Import nugget file: https://github.com/alfonsogildegea/simple_acc_post/blob/master/NUGG_Z_SIMPLE_ACC_POST.nugg
+
+### ABAPGIT
+http://www.abapgit.org
+Import package: https://github.com/alfonsogildegea/simple_acc_post/blob/master/ABAPGIT_20180122.zip
+
+
+
+
+
+
+
