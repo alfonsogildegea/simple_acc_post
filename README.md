@@ -5,7 +5,7 @@ Copy multiple documents to clipboard from one single sheet and post them into SA
 
 You can post debitor, creditor, GL, tax, withholdings tax, CPD customer... like FB50, FB60 or FB70
 
-- [Show in action](#show-in-action)
+- [See it in action](#see-it-in-action)
 - [How it works](#how-it-works)
 - [Fields available](#fields-available)
 - [Install](#install)
