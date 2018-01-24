@@ -16,7 +16,7 @@ You can post debitor, creditor, GL, tax, withholdings tax, CPD customer... like 
 ![Steps](/images/steps.jpg)
 
 
-## Show in action
+## See it in action
 Samples of postings made with BAPI_ACC_DOCUMENT_POST from [SAP note 2083799](https://launchpad.support.sap.com/#/notes/2083799)
 
 #### Single Document
