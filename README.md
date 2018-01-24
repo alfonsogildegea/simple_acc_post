@@ -13,6 +13,9 @@ You can post debitor, creditor, GL, tax, withholdings tax, CPD customer... like 
 	- [SAPLinks](#saplinks-thumbsup)
 	- [ABAPGIT](#abapgit)
 
+![Steps](/images/steps.jpg)
+
+
 ## Show in action :eyes:
 Samples of postings made with BAPI_ACC_DOCUMENT_POST from [SAP note 2083799](https://launchpad.support.sap.com/#/notes/2083799)
 
