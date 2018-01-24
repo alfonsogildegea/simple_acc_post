@@ -59,7 +59,7 @@ CHAR 255|CHAR 5|CHAR 20|CHAR 10|CHAR 4|CHAR 2|DATS 8|DATS 8|CHAR 2|DATS 8|CUKY 5
 ## Install
 
 ### Prerequisites
-:warning: Only if you need bill of exchange postings. They are not supported by BAPI_ACC_DOCUMENT_POST (see note [2076117](https://launchpad.support.sap.com/#/notes/2076117)), and for me, the simplest way to do it's using a BDC with [ZCL_BC_BCD](https://github.com/EsperancaB/sap_project_object/tree/master/UTILITIES/ZCL_BC_BDC). 
+Only if you need bill of exchange postings. They are not supported by BAPI_ACC_DOCUMENT_POST (see note [2076117](https://launchpad.support.sap.com/#/notes/2076117)), and for me, the simplest way to do it's using a BDC with [ZCL_BC_BCD](https://github.com/EsperancaB/sap_project_object/tree/master/UTILITIES/ZCL_BC_BDC). 
 If you don't want install it, only have to do is remove (or comment) method ZCL_SIMPLE_ACC_POST->BDC_POST.
 
 ### SAPLinks (Recommended)
