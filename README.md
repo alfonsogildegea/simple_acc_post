@@ -5,18 +5,18 @@ Copy multiple documents to clipboard from one single sheet and post them into SA
 
 You can post debitor, creditor, GL, tax, withholdings tax, CPD customer... like FB50, FB60 or FB70
 
-- [Show in action](#show-in-action-eyes)
+- [Show in action](#show-in-action)
 - [How it works](#how-it-works)
 - [Fields available](#fields-available)
 - [Install](#install)
 	- [Prerequisites](#prerequisites)
-	- [SAPLinks](#saplinks-thumbsup)
+	- [SAPLinks](#saplinks)
 	- [ABAPGIT](#abapgit)
 
 ![Steps](/images/steps.jpg)
 
 
-## Show in action :eyes:
+## Show in action
 Samples of postings made with BAPI_ACC_DOCUMENT_POST from [SAP note 2083799](https://launchpad.support.sap.com/#/notes/2083799)
 
 #### Single Document
@@ -62,7 +62,7 @@ CHAR 255|CHAR 5|CHAR 20|CHAR 10|CHAR 4|CHAR 2|DATS 8|DATS 8|CHAR 2|DATS 8|CUKY 5
 Only if you need bill of exchange postings. They are not supported by BAPI_ACC_DOCUMENT_POST (see note [2076117](https://launchpad.support.sap.com/#/notes/2076117)), and for me, the simplest way to do it's using a BDC with [ZCL_BC_BCD](https://github.com/EsperancaB/sap_project_object/tree/master/UTILITIES/ZCL_BC_BDC). 
 If you don't want install it, only have to do is remove (or comment) method ZCL_SIMPLE_ACC_POST->BDC_POST.
 
-### SAPLinks :thumbsup:
+### SAPLinks
 [SAPlink User Documentation](https://wiki.scn.sap.com/wiki/display/ABAP/SAPlink+User+Documentation)
 
 Import nugget file: [NUGG_Z_SIMPLE_ACC_POST.nugg](https://github.com/alfonsogildegea/simple_acc_post/blob/master/NUGG_Z_SIMPLE_ACC_POST.nugg)
