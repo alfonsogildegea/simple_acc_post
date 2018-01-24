@@ -1,5 +1,7 @@
 # Multiple SAP postings made with excel's clipboard
 
+Sometimes we have to post several documents in short time, for example, migration from a legacy system, massive operations at the financial close process, etc.
+
 This is a simple way to make business transaction with account posting, from excel with copy / paste method. 
 Copy multiple documents to clipboard from one single sheet and post them into SAP … with one single button !.
 
