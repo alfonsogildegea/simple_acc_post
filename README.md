@@ -1,4 +1,4 @@
-# Multiple SAP postings made with excel's clipboard
+# Multiple SAP postings made with excel clipboard
 
 Sometimes we have to post several documents in short time, for example, migration from a legacy system, massive operations at the financial close process, etc.
 
