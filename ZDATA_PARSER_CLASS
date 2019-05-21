@@ -1,0 +1,668 @@
+*/--------------------------------------------------------------------------------\
+*| This file is part of abap data parser                                          |
+*|                                                                                |
+*| The MIT License (MIT)                                                          |
+*|                                                                                |
+*| Copyright (c) 2016 SBCG Team (www.sbcg.com.ua), Alexander Tsybulsky            |
+*|                                                                                |
+*| Permission is hereby granted, free of charge, to any person obtaining a copy   |
+*| of this software and associated documentation files (the "Software"), to deal  |
+*| in the Software without restriction, including without limitation the rights   |
+*| to use, copy, modify, merge, publish, distribute, sublicense, and/or sell      |
+*| copies of the Software, and to permit persons to whom the Software is          |
+*| furnished to do so, subject to the following conditions:                       |
+*|                                                                                |
+*| The above copyright notice and this permission notice shall be included in all |
+*| copies or substantial portions of the Software.                                |
+*|                                                                                |
+*| THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR     |
+*| IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,       |
+*| FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE    |
+*| AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER         |
+*| LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,  |
+*| OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE  |
+*| SOFTWARE.                                                                      |
+*\--------------------------------------------------------------------------------/
+*/--------------------------------------------------------------------------------\
+*| Leading developers : Alexander Tsybulsky (atsybulsky@sbcg.com.ua)              |
+*|                      Svetlana Shlapak    (sshlapak@sbcg.com.ua)                |
+*|--------------------------------------------------------------------------------|
+*| project homepage: https://github.com/sbcgua/abap_data_parser                   |
+*\--------------------------------------------------------------------------------/
+
+TYPE-POOLS ABAP.
+
+**********************************************************************
+* Exception class
+**********************************************************************
+
+CLASS LCX_DATA_PARSER_ERROR DEFINITION INHERITING FROM CX_STATIC_CHECK FINAL.
+  PUBLIC SECTION.
+    INTERFACES IF_T100_MESSAGE.
+
+    DATA METHNAME TYPE STRING READ-ONLY ##NEEDED.
+    DATA MSG      TYPE STRING READ-ONLY ##NEEDED.
+    DATA CODE     TYPE CHAR2  READ-ONLY.
+
+    DATA STRUC    TYPE STRING READ-ONLY ##NEEDED. " structure type name
+    DATA FIELD    TYPE STRING READ-ONLY ##NEEDED. " field name
+    DATA LINE     TYPE I      READ-ONLY ##NEEDED. " text line number
+    DATA LOCATION TYPE STRING READ-ONLY.          " full location of error STRUC:FIELD@LINE
+    DATA TO_STRING TYPE STRING READ-ONLY.
+
+    METHODS CONSTRUCTOR
+      IMPORTING METHNAME TYPE SYS_CALLS-EVENTNAME
+                MSG      TYPE STRING
+                CODE     TYPE CHAR2
+                STRUC    TYPE STRING OPTIONAL
+                FIELD    TYPE STRING OPTIONAL
+                LINE     TYPE I OPTIONAL.
+
+ENDCLASS.                    "lcx_data_parser_error DEFINITION
+
+*----------------------------------------------------------------------*
+*       CLASS lcx_data_parser_error IMPLEMENTATION
+*----------------------------------------------------------------------*
+*
+*----------------------------------------------------------------------*
+CLASS LCX_DATA_PARSER_ERROR IMPLEMENTATION.
+
+  METHOD CONSTRUCTOR.
+    SUPER->CONSTRUCTOR( ).
+
+    ME->METHNAME = |[PARSER->{ METHNAME }]|.
+    ME->MSG      = MSG.
+    ME->CODE     = CODE.
+    ME->STRUC    = STRUC.
+    ME->FIELD    = FIELD.
+    ME->LINE     = LINE.
+
+    ME->TO_STRING = |ERROR EN LÍNEA { ME->LINE } Y CAMPO '{ ME->FIELD }': { ME->MSG }|.
+
+    IF STRUC IS NOT INITIAL. " Format location
+      ME->LOCATION = STRUC.
+      IF FIELD IS NOT INITIAL.
+        ME->LOCATION = |{ ME->LOCATION }-{ FIELD }|.
+      ENDIF.
+      IF LINE IS NOT INITIAL.
+        ME->LOCATION = |{ ME->LOCATION }@{ LINE }|.
+      ENDIF.
+    ENDIF.
+
+    ME->IF_T100_MESSAGE~T100KEY-MSGID = 'SY'. " & & & &
+    ME->IF_T100_MESSAGE~T100KEY-MSGNO = '499'.
+    ME->IF_T100_MESSAGE~T100KEY-ATTR1 = 'METHNAME'.
+    ME->IF_T100_MESSAGE~T100KEY-ATTR2 = 'MSG'.
+    ME->IF_T100_MESSAGE~T100KEY-ATTR3 = 'LOCATION'.
+  ENDMETHOD.                    "constructor
+
+ENDCLASS. "lcx_data_parser_error
+
+**********************************************************************
+* Parser class
+**********************************************************************
+
+CLASS LCL_DATA_PARSER DEFINITION FINAL CREATE PRIVATE
+*  FRIENDS LCL_TEST_DATA_PARSER
+  .
+
+  PUBLIC SECTION.
+
+    CONSTANTS VERSION TYPE STRING VALUE 'v1.1.1' ##NEEDED.
+
+    CONSTANTS C_TAB   LIKE CL_ABAP_CHAR_UTILITIES=>HORIZONTAL_TAB
+                        VALUE CL_ABAP_CHAR_UTILITIES=>HORIZONTAL_TAB.
+    CONSTANTS C_CRLF  LIKE CL_ABAP_CHAR_UTILITIES=>CR_LF
+                        VALUE CL_ABAP_CHAR_UTILITIES=>CR_LF.
+
+    TYPES:
+      TT_STRING TYPE STANDARD TABLE OF STRING.
+
+    CLASS-METHODS CREATE
+      IMPORTING
+        I_PATTERN        TYPE ANY " target structure or table
+        I_AMOUNT_FORMAT  TYPE CHAR2 OPTIONAL
+      RETURNING
+        VALUE(RO_PARSER) TYPE REF TO LCL_DATA_PARSER
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+    METHODS PARSE
+      IMPORTING
+        I_DATA      TYPE STRING
+        I_STRICT    TYPE ABAP_BOOL DEFAULT ABAP_TRUE
+        I_HAS_HEAD  TYPE ABAP_BOOL DEFAULT ABAP_TRUE
+      EXPORTING
+        E_CONTAINER   TYPE ANY
+        E_HEAD_FIELDS TYPE TT_STRING
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+  PRIVATE SECTION.
+
+    DATA MV_AMOUNT_FORMAT TYPE CHAR2.
+    DATA MO_STRUC_DESCR   TYPE REF TO CL_ABAP_STRUCTDESCR.
+    DATA MV_CURRENT_FIELD TYPE STRING.
+    DATA MV_LINE_INDEX    TYPE SY-TABIX.
+    DATA MT_HEAD_FIELDS   TYPE TT_STRING.
+
+    CLASS-METHODS GET_SAFE_STRUC_DESCR
+      IMPORTING
+        I_PATTERN                     TYPE ANY
+      RETURNING VALUE(RO_STRUC_DESCR) TYPE REF TO CL_ABAP_STRUCTDESCR
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+    METHODS MAP_HEAD_STRUCTURE
+      IMPORTING
+        I_HEADER              TYPE STRING
+        I_STRICT              TYPE ABAP_BOOL
+      RETURNING VALUE(RT_MAP) TYPE INT4_TABLE
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+    METHODS PARSE_DATA
+      IMPORTING
+        IT_DATA        TYPE TT_STRING
+        IT_MAP         TYPE INT4_TABLE
+      EXPORTING
+        E_CONTAINER    TYPE ANY
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+    METHODS PARSE_LINE
+      IMPORTING
+        I_DATALINE     TYPE STRING
+        IT_MAP         TYPE INT4_TABLE
+      EXPORTING
+        ES_CONTAINER   TYPE ANY
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+    METHODS PARSE_FIELD
+      IMPORTING
+        IS_COMPONENT TYPE ABAP_COMPDESCR
+        I_VALUE      TYPE STRING
+      EXPORTING
+        E_FIELD      TYPE ANY
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+    METHODS PARSE_FLOAT
+      IMPORTING
+        I_VALUE      TYPE STRING
+        I_DECIMALS   TYPE ABAP_COMPDESCR-DECIMALS
+      EXPORTING
+        E_FIELD      TYPE ANY
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+    METHODS APPLY_CONV_EXIT
+      IMPORTING
+        I_VALUE    TYPE STRING
+        I_CONVEXIT TYPE STRING
+      EXPORTING
+        E_FIELD    TYPE ANY
+      RAISING
+        LCX_DATA_PARSER_ERROR.
+
+    METHODS RAISE_ERROR
+      IMPORTING MSG   TYPE STRING
+                CODE  TYPE CHAR2 OPTIONAL
+      RAISING   LCX_DATA_PARSER_ERROR.
+
+ENDCLASS.                    "lcl_data_parser DEFINITION
+
+**********************************************************************
+* IMPLEMENTATION
+**********************************************************************
+
+CLASS LCL_DATA_PARSER IMPLEMENTATION.
+
+  METHOD CREATE.
+
+    DATA LO_PARSER  TYPE REF TO LCL_DATA_PARSER.
+    CREATE OBJECT LO_PARSER.
+
+    LO_PARSER->MO_STRUC_DESCR   = GET_SAFE_STRUC_DESCR( I_PATTERN ).
+    LO_PARSER->MV_AMOUNT_FORMAT = ' ,'. " Defaults
+
+    " Not empty param and not empty decimal separator
+    IF NOT ( I_AMOUNT_FORMAT IS INITIAL OR I_AMOUNT_FORMAT+1(1) IS INITIAL ).
+      LO_PARSER->MV_AMOUNT_FORMAT = I_AMOUNT_FORMAT.
+    ENDIF.
+
+    RO_PARSER = LO_PARSER.
+
+  ENDMETHOD.  "create
+
+  METHOD PARSE.
+    DATA:
+          LT_DATA      TYPE TT_STRING,
+          LT_MAP       TYPE INT4_TABLE,
+          LS_COMPONENT TYPE ABAP_COMPDESCR,
+          L_HEADER_STR TYPE STRING.
+
+    CLEAR: E_CONTAINER, E_HEAD_FIELDS.
+    CLEAR: MV_LINE_INDEX, MT_HEAD_FIELDS.
+
+    " Validate params
+    IF I_HAS_HEAD = ABAP_FALSE AND I_STRICT = ABAP_FALSE.
+      RAISE_ERROR( MSG = 'Header line mandatory for non-strict mode' CODE = 'WP' ). "#EC NOTEXT
+    ENDIF.
+
+    " Check container type
+    IF MO_STRUC_DESCR->ABSOLUTE_NAME <> GET_SAFE_STRUC_DESCR( E_CONTAINER )->ABSOLUTE_NAME.
+      RAISE_ERROR( MSG = 'Container type does not fit pattern' CODE = 'TE' ). "#EC NOTEXT
+    ENDIF.
+
+    SPLIT I_DATA AT C_CRLF INTO TABLE LT_DATA.
+
+    " Read and process header line
+    IF I_HAS_HEAD = ABAP_TRUE.
+      READ TABLE LT_DATA INTO L_HEADER_STR INDEX 1.
+      IF SY-SUBRC <> 0.
+        RAISE_ERROR( MSG = 'Data empty' CODE = 'DE' ).      "#EC NOTEXT
+      ENDIF.
+      IF L_HEADER_STR IS INITIAL.
+        RAISE_ERROR( MSG = 'Header line is empty'  CODE = 'HE' ). "#EC NOTEXT
+      ENDIF.
+
+      LT_MAP = ME->MAP_HEAD_STRUCTURE( I_HEADER = TO_UPPER( L_HEADER_STR )
+                                       I_STRICT = I_STRICT ).
+      DELETE LT_DATA INDEX 1.
+    ELSE.
+      LOOP AT MO_STRUC_DESCR->COMPONENTS INTO LS_COMPONENT.
+        APPEND SY-TABIX TO LT_MAP.
+        APPEND LS_COMPONENT-NAME TO MT_HEAD_FIELDS.
+      ENDLOOP.
+    ENDIF.
+
+    " Do parsing
+    PARSE_DATA( EXPORTING IT_DATA     = LT_DATA
+                          IT_MAP      = LT_MAP
+                IMPORTING E_CONTAINER = E_CONTAINER ).
+
+    E_HEAD_FIELDS = MT_HEAD_FIELDS.
+
+  ENDMETHOD.  "parse
+
+  METHOD GET_SAFE_STRUC_DESCR.
+    DATA:
+          LO_TYPE_DESCR  TYPE REF TO CL_ABAP_TYPEDESCR,
+          LO_TABLE_DESCR TYPE REF TO CL_ABAP_TABLEDESCR.
+
+    " Identify structure type
+    LO_TYPE_DESCR = CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA( I_PATTERN ).
+    CASE LO_TYPE_DESCR->KIND.
+      WHEN 'T'. " Table
+        LO_TABLE_DESCR ?= LO_TYPE_DESCR.
+        RO_STRUC_DESCR ?= LO_TABLE_DESCR->GET_TABLE_LINE_TYPE( ).
+      WHEN 'S'. " Structure
+        RO_STRUC_DESCR ?= LO_TYPE_DESCR.
+      WHEN OTHERS. " Not a table or structure ?
+        RAISE EXCEPTION TYPE LCX_DATA_PARSER_ERROR
+          EXPORTING
+            METHNAME = 'GET_SAFE_STRUC_DESCR'
+            MSG      = 'Table or structure patterns only'   "#EC NOTEXT
+            CODE     = 'PE'.
+    ENDCASE.
+
+  ENDMETHOD.  "get_safe_struc_descr
+
+  METHOD MAP_HEAD_STRUCTURE.
+    DATA:
+          LT_FIELDS    TYPE TT_STRING,
+          L_FIELD_CNT  TYPE I,
+          L_MANDT_CNT  TYPE I,
+          L_TAB_CNT    TYPE I,
+          LT_DUPCHECK  TYPE TT_STRING.
+
+    FIELD-SYMBOLS <FIELD> TYPE STRING.
+
+    SPLIT I_HEADER AT C_TAB INTO TABLE LT_FIELDS.
+    L_FIELD_CNT  = LINES( LT_FIELDS ).
+
+    " Check if the line ends with TAB
+    FIND ALL OCCURRENCES OF C_TAB IN I_HEADER MATCH COUNT L_TAB_CNT.
+    IF L_TAB_CNT = L_FIELD_CNT. " Line ends with TAB, last empty field is not added to table, see help for 'split'
+      RAISE_ERROR( MSG = 'Empty field at the end' CODE = 'EE' ). "#EC NOTEXT
+    ENDIF.
+
+    " Compare number of fields, check structure similarity
+    IF I_STRICT = ABAP_TRUE.
+      READ TABLE MO_STRUC_DESCR->COMPONENTS WITH KEY NAME = 'MANDT' TRANSPORTING NO FIELDS.
+      IF SY-SUBRC IS INITIAL. " Found in structure components
+        READ TABLE LT_FIELDS WITH KEY TABLE_LINE = 'MANDT' TRANSPORTING NO FIELDS.
+        IF SY-SUBRC IS NOT INITIAL. " But not found in the file
+          L_MANDT_CNT = 1. " MANDT field may be skipped
+        ENDIF.
+      ENDIF.
+
+      IF L_FIELD_CNT + L_MANDT_CNT <> LINES( MO_STRUC_DESCR->COMPONENTS ).
+        RAISE_ERROR( MSG = 'Different columns number' CODE = 'CN' ). "#EC NOTEXT
+      ENDIF.
+    ENDIF.
+
+    " Check duplicate field names in incoming structure
+    LT_DUPCHECK[] = LT_FIELDS[].
+    SORT LT_DUPCHECK[].
+    DELETE ADJACENT DUPLICATES FROM LT_DUPCHECK[].
+    IF LINES( LT_DUPCHECK ) <> L_FIELD_CNT.
+      RAISE_ERROR( MSG = 'Duplicate field names found' CODE = 'DN' ). "#EC NOTEXT
+    ENDIF.
+
+    " Compare columns names and make map
+    LOOP AT LT_FIELDS ASSIGNING <FIELD>.
+      IF <FIELD> IS INITIAL. " Check empty fields
+        RAISE_ERROR( MSG = 'Empty field name found' CODE = 'EN' ). "#EC NOTEXT
+      ENDIF.
+
+      READ TABLE MO_STRUC_DESCR->COMPONENTS WITH KEY NAME = <FIELD> TRANSPORTING NO FIELDS.
+      IF SY-SUBRC IS INITIAL.
+        APPEND SY-TABIX TO RT_MAP.
+      ELSE.
+        RAISE_ERROR( MSG = |Field { <FIELD> } not found in structure| CODE = 'MC'). "#EC NOTEXT
+      ENDIF.
+    ENDLOOP.
+
+    MT_HEAD_FIELDS = LT_FIELDS. " Save field list to return to the caller
+
+  ENDMETHOD.  "map_head_structure
+
+  METHOD PARSE_DATA.
+    DATA:
+          L_CONTAINER_KIND LIKE CL_ABAP_TYPEDESCR=>KIND,
+          REF_TAB_LINE     TYPE REF TO DATA.
+
+    FIELD-SYMBOLS:
+                   <DATALINE> TYPE STRING,
+                   <TABLE>    TYPE ANY TABLE,
+                   <RECORD>   TYPE ANY.
+
+    CLEAR E_CONTAINER.
+
+    " Identify container type and Create temp container record
+    L_CONTAINER_KIND = CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA( E_CONTAINER )->KIND.
+    CREATE DATA REF_TAB_LINE TYPE HANDLE MO_STRUC_DESCR.
+    ASSIGN REF_TAB_LINE->* TO <RECORD>.
+    IF L_CONTAINER_KIND = 'T'. " Table
+      ASSIGN E_CONTAINER   TO <TABLE>.
+    ENDIF.
+
+    " Main parsing loop
+    LOOP AT IT_DATA ASSIGNING <DATALINE>.
+      MV_LINE_INDEX = SY-TABIX.
+
+      IF <DATALINE> IS INITIAL. " Check empty lines
+        CHECK MV_LINE_INDEX < LINES( IT_DATA ). " Last line of a file may be empty, others - not
+        RAISE_ERROR( MSG = 'Empty line cannot be parsed'  CODE = 'LE' ). "#EC NOTEXT
+      ENDIF.
+
+      ME->PARSE_LINE( EXPORTING I_DATALINE     = <DATALINE>
+                                IT_MAP         = IT_MAP
+                      IMPORTING ES_CONTAINER   = <RECORD> ).
+
+      IF L_CONTAINER_KIND = 'T'. " Table
+        INSERT <RECORD> INTO TABLE <TABLE>.
+      ELSE.                      " Structure
+        E_CONTAINER = <RECORD>.
+        EXIT. " Only first line goes to structure and then exits
+      ENDIF.
+
+    ENDLOOP.
+
+  ENDMETHOD.  "parse_data
+
+  METHOD PARSE_LINE.
+    DATA:
+          LT_FIELDS      TYPE TABLE OF STRING,
+          L_TAB_CNT      TYPE I,
+          L_FIELD_VALUE  TYPE STRING,
+          LS_COMPONENT   TYPE ABAP_COMPDESCR,
+          L_INDEX        TYPE INT4.
+
+    FIELD-SYMBOLS <FIELD> TYPE ANY.
+
+    CLEAR ES_CONTAINER.
+    SPLIT I_DATALINE AT C_TAB INTO TABLE LT_FIELDS.
+
+    " Count TABs, if line ends with TAB last empty field is not added to table, see help for 'split'
+    FIND ALL OCCURRENCES OF C_TAB IN I_DATALINE MATCH COUNT L_TAB_CNT.
+    L_TAB_CNT = L_TAB_CNT + 1. " Number of fields in the line
+
+    " Check field number is the same as in header
+    IF L_TAB_CNT > LINES( IT_MAP ).
+      RAISE_ERROR( MSG = 'More fields than in header' CODE = '>H' ). "#EC NOTEXT
+    ELSEIF L_TAB_CNT < LINES( IT_MAP ).
+      RAISE_ERROR( MSG = 'Less fields than in header' CODE = '<H' ). "#EC NOTEXT
+    ENDIF.
+
+    " Move data to table line
+    LOOP AT LT_FIELDS INTO L_FIELD_VALUE.
+      READ TABLE IT_MAP                     INTO L_INDEX      INDEX SY-TABIX. " Read map
+      READ TABLE MO_STRUC_DESCR->COMPONENTS INTO LS_COMPONENT INDEX L_INDEX.  " Get component
+      IF SY-SUBRC IS NOT INITIAL.
+        RAISE_ERROR( 'No component found?!' ).              "#EC NOTEXT
+      ENDIF.
+
+      CHECK LS_COMPONENT-NAME NE 'MANDT'.   " Skip client fields
+      MV_CURRENT_FIELD = LS_COMPONENT-NAME. " For error handling
+
+      UNASSIGN <FIELD>.
+      ASSIGN COMPONENT LS_COMPONENT-NAME OF STRUCTURE ES_CONTAINER TO <FIELD>.
+      IF <FIELD> IS NOT ASSIGNED.
+        RAISE_ERROR( 'Field assign failed?!' ).             "#EC NOTEXT
+      ENDIF.
+
+      ME->PARSE_FIELD( EXPORTING IS_COMPONENT = LS_COMPONENT
+                                 I_VALUE      = L_FIELD_VALUE
+                       IMPORTING E_FIELD      = <FIELD> ).
+      CLEAR MV_CURRENT_FIELD. " For error handling - field is not processed any more
+    ENDLOOP.
+
+  ENDMETHOD.                    "parse_line
+
+
+  METHOD PARSE_FIELD.
+    DATA: L_MASK TYPE STRING,
+          L_LEN  TYPE I.
+
+    CLEAR E_FIELD.
+
+    CASE IS_COMPONENT-TYPE_KIND.
+      WHEN CL_ABAP_TYPEDESCR=>TYPEKIND_DATE. " Date
+        DATA S_FECHA TYPE STRING.
+        S_FECHA = I_VALUE.
+        REPLACE ALL OCCURRENCES OF '/' in S_FECHA WITH '.'.
+        CALL FUNCTION 'CONVERT_DATE_TO_INTERNAL'
+          EXPORTING
+            DATE_EXTERNAL            = S_FECHA
+            ACCEPT_INITIAL_DATE      = 'X'
+          IMPORTING
+            DATE_INTERNAL            = E_FIELD
+          EXCEPTIONS
+            DATE_EXTERNAL_IS_INVALID = 4.
+
+      WHEN CL_ABAP_TYPEDESCR=>TYPEKIND_CHAR. " Char + Alpha
+        DESCRIBE FIELD E_FIELD LENGTH L_LEN IN CHARACTER MODE.
+        IF L_LEN < STRLEN( I_VALUE ).
+          RAISE_ERROR( MSG = 'Value is longer than field' CODE = 'FS' ). "#EC NOTEXT
+        ENDIF.
+
+        DESCRIBE FIELD E_FIELD EDIT MASK L_MASK.
+        IF L_MASK IS INITIAL.
+          E_FIELD = I_VALUE.
+        ELSE.
+          SHIFT L_MASK LEFT DELETING LEADING '='.
+          ME->APPLY_CONV_EXIT( EXPORTING I_VALUE    = I_VALUE
+                                         I_CONVEXIT = L_MASK
+                               IMPORTING E_FIELD    = E_FIELD ).
+        ENDIF.
+
+      WHEN CL_ABAP_TYPEDESCR=>TYPEKIND_STRING. " String
+        E_FIELD = I_VALUE.
+
+      WHEN CL_ABAP_TYPEDESCR=>TYPEKIND_PACKED. " Amount
+        PARSE_FLOAT( EXPORTING  I_VALUE    = I_VALUE
+                                I_DECIMALS = IS_COMPONENT-DECIMALS
+                     IMPORTING  E_FIELD    = E_FIELD ).
+
+      WHEN CL_ABAP_TYPEDESCR=>TYPEKIND_FLOAT. " Float
+        PARSE_FLOAT( EXPORTING  I_VALUE    = I_VALUE
+                                I_DECIMALS = 34 " Abap decimal digit limit ?
+                     IMPORTING  E_FIELD    = E_FIELD ).
+
+      WHEN CL_ABAP_TYPEDESCR=>TYPEKIND_INT. " Integer
+        IF I_VALUE CO '0123456789'.
+          E_FIELD = I_VALUE.
+        ELSE.
+          SY-SUBRC = 4.
+        ENDIF.
+
+      WHEN CL_ABAP_TYPEDESCR=>TYPEKIND_NUM. " Numchar
+        DESCRIBE FIELD E_FIELD LENGTH L_LEN IN CHARACTER MODE.
+        IF L_LEN < STRLEN( I_VALUE ).
+          RAISE_ERROR( MSG = 'Value is longer than field' CODE = 'FS' ). "#EC NOTEXT
+        ENDIF.
+
+        IF I_VALUE CO '0123456789'.
+          E_FIELD = I_VALUE.
+        ELSE.
+          SY-SUBRC = 4.
+        ENDIF.
+
+      WHEN CL_ABAP_TYPEDESCR=>TYPEKIND_HEX. " Raw
+        DESCRIBE FIELD E_FIELD LENGTH L_LEN IN BYTE MODE.
+        IF L_LEN < STRLEN( I_VALUE ) / 2 + STRLEN( I_VALUE ) MOD 2. " 2 hex-char per byte
+          RAISE_ERROR( MSG = 'Value is longer than field' CODE = 'FS' ). "#EC NOTEXT
+        ENDIF.
+
+        TRY .
+            E_FIELD = I_VALUE.
+          CATCH CX_SY_CONVERSION_NO_RAW CX_SY_CONVERSION_ERROR.
+            SY-SUBRC = 4.
+        ENDTRY.
+
+      WHEN OTHERS.
+        RAISE_ERROR( MSG = 'Unsupported field type' CODE = 'UT' ). "#EC NOTEXT
+
+    ENDCASE.
+
+    IF SY-SUBRC IS NOT INITIAL.
+      RAISE_ERROR( MSG = 'Field parsing failed' CODE = 'PF' ). "#EC NOTEXT
+    ENDIF.
+
+  ENDMETHOD.  "parse_field
+
+  METHOD PARSE_FLOAT.
+    DATA:
+          L_DECIMAL_SEP  TYPE C,
+          L_THOUSAND_SEP TYPE C,
+          L_TMP          TYPE STRING,
+          L_REGEX        TYPE STRING.
+
+    L_THOUSAND_SEP = MV_AMOUNT_FORMAT+0(1).
+    L_DECIMAL_SEP  = MV_AMOUNT_FORMAT+1(1).
+
+    TRY .
+        E_FIELD = I_VALUE. " Try native format first - xxxx.xx
+      CATCH CX_SY_ARITHMETIC_ERROR CX_SY_CONVERSION_ERROR.
+
+        L_TMP   = I_VALUE.
+        L_REGEX = '^-?\d{1,3}(T\d{3})*(\D\d{1,C})?$'.       "#EC NOTEXT
+        CONDENSE L_TMP NO-GAPS.
+        REPLACE 'C' IN L_REGEX WITH |{ I_DECIMALS }|.
+
+        " Validate number
+        FIND FIRST OCCURRENCE OF L_THOUSAND_SEP IN L_TMP.
+        IF SY-SUBRC IS INITIAL. " Found
+          REPLACE 'T' IN L_REGEX WITH L_THOUSAND_SEP.
+        ELSE.
+          REPLACE 'T' IN L_REGEX WITH ''.
+        ENDIF.
+
+        REPLACE 'D' IN L_REGEX WITH L_DECIMAL_SEP.
+        FIND ALL OCCURRENCES OF REGEX L_REGEX IN L_TMP MATCH COUNT SY-TABIX.
+
+        IF SY-TABIX = 1.
+          IF NOT L_THOUSAND_SEP IS INITIAL.  " Remove thousand separators
+            REPLACE ALL OCCURRENCES OF L_THOUSAND_SEP IN L_TMP WITH ''.
+          ENDIF.
+
+          IF L_DECIMAL_SEP <> '.'.           " Replace decimal separator
+            REPLACE L_DECIMAL_SEP IN L_TMP WITH '.'.
+          ENDIF.
+
+          TRY. " Try converting again
+              E_FIELD = L_TMP.
+            CATCH CX_SY_ARITHMETIC_ERROR CX_SY_CONVERSION_ERROR.
+              RAISE_ERROR( MSG = 'Float number parsing failed' CODE = 'PF' ). "#EC NOTEXT
+          ENDTRY.
+        ELSE. " Not matched
+          RAISE_ERROR( MSG = 'Float number parsing failed' CODE = 'PF' ). "#EC NOTEXT
+        ENDIF.
+    ENDTRY.
+
+  ENDMETHOD.  "parse_float
+
+  METHOD APPLY_CONV_EXIT.
+
+    DATA L_FM_NAME TYPE RS38L_FNAM VALUE 'CONVERSION_EXIT_XXXXX_INPUT'.
+
+    REPLACE FIRST OCCURRENCE OF 'XXXXX' IN L_FM_NAME WITH I_CONVEXIT.
+
+    CALL FUNCTION 'FUNCTION_EXISTS'
+      EXPORTING
+        FUNCNAME           = L_FM_NAME
+      EXCEPTIONS
+        FUNCTION_NOT_EXIST = 1
+        OTHERS             = 2.
+
+    IF SY-SUBRC <> 0.
+      RAISE_ERROR( MSG = 'Conversion exit not found' CODE = 'EM' ). "#EC NOTEXT
+    ENDIF.
+
+    CALL FUNCTION L_FM_NAME
+      EXPORTING
+        INPUT  = I_VALUE
+      IMPORTING
+        OUTPUT = E_FIELD
+      EXCEPTIONS
+        OTHERS = 1.
+
+    IF SY-SUBRC <> 0.
+      RAISE_ERROR( MSG = 'Conversion exit failed' CODE = 'EF' ). "#EC NOTEXT
+    ENDIF.
+
+  ENDMETHOD.  "apply_conv_exit
+
+  METHOD RAISE_ERROR.
+    DATA: SYS_CALL    TYPE SYS_CALLS,
+          SYS_STACK   TYPE SYS_CALLST,
+          L_STRUC     TYPE STRING.
+
+    CALL FUNCTION 'SYSTEM_CALLSTACK' " Get stack information
+      EXPORTING
+        MAX_LEVEL    = 2
+      IMPORTING
+        ET_CALLSTACK = SYS_STACK.
+
+    READ TABLE SYS_STACK INTO SYS_CALL INDEX 2.
+
+    IF MO_STRUC_DESCR IS BOUND.
+      L_STRUC = MO_STRUC_DESCR->GET_RELATIVE_NAME( ).
+    ENDIF.
+
+    RAISE EXCEPTION TYPE LCX_DATA_PARSER_ERROR
+      EXPORTING
+        METHNAME = SYS_CALL-EVENTNAME
+        MSG      = MSG
+        CODE     = CODE
+        STRUC    = L_STRUC
+        FIELD    = MV_CURRENT_FIELD
+        LINE     = MV_LINE_INDEX.
+
+  ENDMETHOD.  "raise_error
+
+ENDCLASS.                    "lcl_data_parser IMPLEMENTATION
